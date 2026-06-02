@@ -302,18 +302,18 @@
 <!-- ==================== ACERTO COM ROGÉRIO ==================== -->
 <section id="panel-acerto" class="panel">
   <div class="card">
-    <h2>Contas fixas mensais</h2>
-    <div class="desc">Cadastre as contas recorrentes. O sistema separa automaticamente por período (1-15 e 15-30).</div>
+    <h2>Contas recorrentes</h2>
+    <div class="desc">Cadastre as contas que se repetem todo mês. O valor estimado serve de referência — você ajusta na hora de enviar.</div>
     <div class="conta-row header">
-      <div>Descrição</div><div>Valor R$</div><div>Dia venc.</div><div></div>
+      <div>Descrição</div><div>Valor ref.</div><div>Dia venc.</div><div></div>
     </div>
     <div id="contasFixasList"></div>
-    <button class="btn secondary" onclick="abrirModalContaFixa()" style="margin-top:12px">+ Adicionar conta fixa</button>
+    <button class="btn secondary" onclick="abrirModalContaFixa()" style="margin-top:12px">+ Adicionar conta</button>
   </div>
 
   <div class="card">
     <h2>Gerar lista para Rogério</h2>
-    <div class="desc">Selecione o período e gere a mensagem pronta para enviar.</div>
+    <div class="desc">Selecione o período, ajuste os valores reais deste mês e envie.</div>
     <div class="row" style="margin-bottom:14px;gap:12px">
       <label class="small">Mês/Ano:
         <select id="acertoMes" onchange="renderAcertoPreview()"></select>
@@ -328,10 +328,12 @@
     <div class="acerto-periodo">
       <div>
         <h3>Contas do período</h3>
+        <div class="desc" style="margin-bottom:8px">Ajuste o valor real de cada conta. Desmarque as que não se aplicam este mês.</div>
         <div id="acertoContasPeriodo"></div>
+        <button class="btn secondary sm" onclick="addContaAvulsa()" style="margin-top:10px">+ Conta avulsa neste período</button>
       </div>
       <div>
-        <h3>Extras pendentes</h3>
+        <h3>Extras que eu paguei</h3>
         <div class="desc" style="margin-bottom:8px">Gastos que você pagou e precisa informar ao Rogério.</div>
         <div id="acertoExtras"></div>
         <button class="btn secondary sm" onclick="abrirModalExtra()" style="margin-top:10px">+ Adicionar gasto extra</button>
@@ -524,12 +526,13 @@
 <!-- Modal: conta fixa -->
 <div class="modal-bg" id="modalContaFixa">
   <div class="modal">
-    <h3 id="modalContaFixaTitulo">Adicionar conta fixa</h3>
+    <h3 id="modalContaFixaTitulo">Adicionar conta recorrente</h3>
     <div class="form-row"><label>Descrição</label><input type="text" id="cfDescricao" placeholder="Ex: Conta de luz"></div>
     <div class="form-grid">
-      <div class="form-row"><label>Valor R$</label><input type="text" id="cfValor" placeholder="350,00"></div>
+      <div class="form-row"><label>Valor de referência R$</label><input type="text" id="cfValor" placeholder="350,00"></div>
       <div class="form-row"><label>Dia do vencimento</label><input type="number" id="cfDia" min="1" max="31" placeholder="10"></div>
     </div>
+    <div class="small" style="color:var(--text-dim)">O valor de referência é só uma sugestão. Você ajusta o valor real na hora de enviar.</div>
     <div class="row" style="margin-top:16px">
       <button class="btn" onclick="salvarContaFixa()">Salvar</button>
       <button class="btn secondary" onclick="fecharModal('modalContaFixa')">Cancelar</button>
@@ -2329,6 +2332,23 @@ function renderAcertoMeses() {
   periodoSel.value = hoje.getDate() < 15 ? '1-15' : '15-30';
 }
 
+// — Contas avulsas temporárias (só pro período atual) —
+let contasAvulsas = [];
+
+function addContaAvulsa() {
+  const desc = prompt('Descrição da conta:');
+  if (!desc) return;
+  const valStr = prompt('Valor R$:');
+  if (!valStr) return;
+  const val = parseFloat(valStr.replace(/\./g,'').replace(',','.'));
+  if (isNaN(val) || val <= 0) { alert('Valor inválido.'); return; }
+  const diaStr = prompt('Dia do vencimento:');
+  const dia = parseInt(diaStr);
+  if (isNaN(dia) || dia < 1 || dia > 31) { alert('Dia inválido.'); return; }
+  contasAvulsas.push({ id: 'av_' + Date.now(), descricao: desc.trim(), valor: val, dia });
+  renderAcertoPreview();
+}
+
 // — Preview da mensagem —
 function renderAcertoPreview() {
   const mes = document.getElementById('acertoMes')?.value;
@@ -2338,29 +2358,31 @@ function renderAcertoPreview() {
   const diaMin = periodo === '1-15' ? 1 : 15;
   const diaMax = periodo === '1-15' ? 15 : 31;
 
-  // Contas fixas do período
-  const contasPeriodo = STATE.contasFixas
-    .filter(c => c.dia >= diaMin && c.dia <= diaMax)
-    .sort((a,b) => a.dia - b.dia);
+  // Contas recorrentes do período + avulsas
+  const contasPeriodo = [
+    ...STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'fixa'})),
+    ...contasAvulsas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'avulsa'}))
+  ].sort((a,b) => a.dia - b.dia);
 
   let htmlContas = '';
   if (!contasPeriodo.length) {
-    htmlContas = '<div class="small" style="padding:10px;color:var(--text-dim)">Nenhuma conta fixa neste período.</div>';
+    htmlContas = '<div class="small" style="padding:10px;color:var(--text-dim)">Nenhuma conta neste período.</div>';
   } else {
     for (const c of contasPeriodo) {
-      htmlContas += `<div class="extra-item">
-        <div class="desc">${c.descricao} <span class="small">(dia ${c.dia})</span></div>
-        <div class="val">${fmtBRL(c.valor)}</div>
+      const inputId = 'acv_' + c.id;
+      const cbId = 'acb_' + c.id;
+      htmlContas += `<div class="extra-item" style="gap:6px">
+        <input type="checkbox" id="${cbId}" checked onchange="atualizarMensagem()" style="width:16px;height:16px">
+        <div class="desc" style="flex:1">${c.descricao} <span class="small">(dia ${c.dia})</span>${c.tipo==='avulsa'?' <span class="badge amber" style="font-size:9px">avulsa</span>':''}</div>
+        <div style="width:110px"><input type="text" id="${inputId}" value="${c.valor.toFixed(2).replace('.',',')}" onchange="atualizarMensagem()" style="width:100%;text-align:right;font-weight:600"></div>
+        ${c.tipo==='avulsa'?`<button class="icon-btn" onclick="contasAvulsas=contasAvulsas.filter(x=>x.id!=='${c.id}');renderAcertoPreview()">🗑️</button>`:''}
       </div>`;
     }
-    const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
-    htmlContas += `<div class="extra-item" style="font-weight:600;border-top:2px solid var(--border)">
-      <div class="desc">Subtotal fixas</div><div class="val">${fmtBRL(totalFixas)}</div>
-    </div>`;
+    htmlContas += `<div id="subtotalFixas" class="extra-item" style="font-weight:600;border-top:2px solid var(--border)"></div>`;
   }
   document.getElementById('acertoContasPeriodo').innerHTML = htmlContas;
 
-  // Extras pendentes (não enviados)
+  // Extras pendentes
   const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado);
   let htmlExtras = '';
   if (!extrasPendentes.length) {
@@ -2380,24 +2402,63 @@ function renderAcertoPreview() {
   }
   document.getElementById('acertoExtras').innerHTML = htmlExtras;
 
-  // Montar mensagem
-  const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
-  const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
+  atualizarMensagem();
+}
+
+function lerContasDoFormulario() {
+  const mes = document.getElementById('acertoMes')?.value;
+  const periodo = document.getElementById('acertoPeriodo')?.value;
+  if (!mes || !periodo) return { contas: [], extras: [], mes, periodo };
+
+  const diaMin = periodo === '1-15' ? 1 : 15;
+  const diaMax = periodo === '1-15' ? 15 : 31;
+
+  const contasPeriodo = [
+    ...STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'fixa'})),
+    ...contasAvulsas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'avulsa'}))
+  ].sort((a,b) => a.dia - b.dia);
+
+  // Ler valores editados e checkboxes
+  const contas = [];
+  for (const c of contasPeriodo) {
+    const cb = document.getElementById('acb_' + c.id);
+    const input = document.getElementById('acv_' + c.id);
+    if (!cb || !cb.checked) continue;
+    const val = parseFloat((input?.value || '0').replace(/\./g,'').replace(',','.'));
+    contas.push({ descricao: c.descricao, valor: isNaN(val) ? c.valor : val, dia: c.dia });
+  }
+
+  const extras = (STATE.extras || []).filter(e => !e.enviado);
+  return { contas, extras, mes, periodo };
+}
+
+function atualizarMensagem() {
+  const { contas, extras, mes, periodo } = lerContasDoFormulario();
+
+  // Atualizar subtotal
+  const subEl = document.getElementById('subtotalFixas');
+  if (subEl) {
+    const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
+    subEl.innerHTML = `<div class="desc">Subtotal contas</div><div class="val">${fmtBRL(totalFixas)}</div>`;
+  }
+
+  const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
+  const totalExtras = extras.reduce((s,e) => s+e.valor, 0);
   const totalGeral = totalFixas + totalExtras;
 
   let msg = `📋 *Contas ${mes} — Período ${periodo}*\n\n`;
 
-  if (contasPeriodo.length) {
-    msg += `*Contas fixas:*\n`;
-    for (const c of contasPeriodo) {
+  if (contas.length) {
+    msg += `*Contas:*\n`;
+    for (const c of contas) {
       msg += `  • ${c.descricao} (dia ${c.dia}) — ${fmtBRL(c.valor)}\n`;
     }
     msg += `  _Subtotal: ${fmtBRL(totalFixas)}_\n`;
   }
 
-  if (extrasPendentes.length) {
+  if (extras.length) {
     msg += `\n*Extras que paguei:*\n`;
-    for (const e of extrasPendentes) {
+    for (const e of extras) {
       msg += `  • ${e.descricao} (${e.data}) — ${fmtBRL(e.valor)}\n`;
     }
     msg += `  _Subtotal: ${fmtBRL(totalExtras)}_\n`;
@@ -2460,19 +2521,19 @@ function enviarWhatsApp() {
 }
 
 function marcarEnviado() {
-  const mes = document.getElementById('acertoMes').value;
-  const periodo = document.getElementById('acertoPeriodo').value;
+  const { contas, extras, mes, periodo } = lerContasDoFormulario();
   const msg = document.getElementById('acertoMsgPreview').textContent;
 
-  const diaMin = periodo === '1-15' ? 1 : 15;
-  const diaMax = periodo === '1-15' ? 15 : 31;
-  const contasPeriodo = STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax);
-  const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado);
-  const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
-  const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
+  const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
+  const totalExtras = extras.reduce((s,e) => s+e.valor, 0);
 
   // Marcar extras como enviados
-  for (const e of extrasPendentes) e.enviado = true;
+  for (const e of (STATE.extras || [])) {
+    if (!e.enviado) e.enviado = true;
+  }
+
+  // Limpar avulsas
+  contasAvulsas = [];
 
   // Salvar no histórico
   STATE.acertos.push({
@@ -2480,8 +2541,8 @@ function marcarEnviado() {
     data: new Date().toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric'}),
     mes, periodo, totalFixas, totalExtras,
     total: totalFixas + totalExtras,
-    contasFixas: contasPeriodo.map(c => ({descricao: c.descricao, valor: c.valor, dia: c.dia})),
-    extras: extrasPendentes.map(e => ({descricao: e.descricao, valor: e.valor, data: e.data})),
+    contasFixas: contas,
+    extras: extras.map(e => ({descricao: e.descricao, valor: e.valor, data: e.data})),
     mensagem: msg
   });
 
