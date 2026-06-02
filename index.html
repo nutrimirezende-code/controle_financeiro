@@ -148,6 +148,18 @@
   .bulk-bar .count { font-weight: 600; }
   /* Orcamento config */
   .orc-row { display: grid; grid-template-columns: 1fr 120px 60px; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: center; font-size: 13px; }
+  /* Acerto */
+  .acerto-periodo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .acerto-box { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .acerto-box h3 { margin: 0 0 10px 0; font-size: 14px; font-weight: 600; }
+  .acerto-box .periodo-label { font-size: 12px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 12px; }
+  .conta-row { display: grid; grid-template-columns: 1fr 80px 60px 50px; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); align-items: center; font-size: 13px; }
+  .conta-row.header { font-weight: 600; font-size: 11px; color: var(--text-soft); text-transform: uppercase; border-bottom: 2px solid var(--border); }
+  .msg-preview { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 13px; white-space: pre-wrap; font-family: inherit; line-height: 1.6; max-height: 400px; overflow-y: auto; }
+  .extra-item { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .extra-item .desc { flex: 1; }
+  .extra-item .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+  @media (max-width: 768px) { .acerto-periodo { grid-template-columns: 1fr; } }
   /* Inline edit */
   td.editing input { width: 100%; padding: 4px 6px; font-size: 13px; }
   /* Responsive */
@@ -186,6 +198,7 @@
   <nav>
     <button data-tab="upload" class="active">Upload de Fatura</button>
     <button data-tab="historico">Histórico</button>
+    <button data-tab="acerto">Acerto</button>
     <button data-tab="dicionario">Dicionário</button>
     <button data-tab="config">Configurações</button>
   </nav>
@@ -282,6 +295,63 @@
       <label>Buscar: <input type="text" id="filterText" placeholder="estabelecimento..."></label>
     </div>
     <div id="lancamentosTable" style="max-height: 540px; overflow-y: auto;"></div>
+  </div>
+</section>
+
+<!-- ==================== DICIONÁRIO ==================== -->
+<!-- ==================== ACERTO COM ROGÉRIO ==================== -->
+<section id="panel-acerto" class="panel">
+  <div class="card">
+    <h2>Contas fixas mensais</h2>
+    <div class="desc">Cadastre as contas recorrentes. O sistema separa automaticamente por período (1-15 e 15-30).</div>
+    <div class="conta-row header">
+      <div>Descrição</div><div>Valor R$</div><div>Dia venc.</div><div></div>
+    </div>
+    <div id="contasFixasList"></div>
+    <button class="btn secondary" onclick="abrirModalContaFixa()" style="margin-top:12px">+ Adicionar conta fixa</button>
+  </div>
+
+  <div class="card">
+    <h2>Gerar lista para Rogério</h2>
+    <div class="desc">Selecione o período e gere a mensagem pronta para enviar.</div>
+    <div class="row" style="margin-bottom:14px;gap:12px">
+      <label class="small">Mês/Ano:
+        <select id="acertoMes" onchange="renderAcertoPreview()"></select>
+      </label>
+      <label class="small">Período:
+        <select id="acertoPeriodo" onchange="renderAcertoPreview()">
+          <option value="1-15">Dia 1 a 15</option>
+          <option value="15-30">Dia 15 a 30</option>
+        </select>
+      </label>
+    </div>
+    <div class="acerto-periodo">
+      <div>
+        <h3>Contas do período</h3>
+        <div id="acertoContasPeriodo"></div>
+      </div>
+      <div>
+        <h3>Extras pendentes</h3>
+        <div class="desc" style="margin-bottom:8px">Gastos que você pagou e precisa informar ao Rogério.</div>
+        <div id="acertoExtras"></div>
+        <button class="btn secondary sm" onclick="abrirModalExtra()" style="margin-top:10px">+ Adicionar gasto extra</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Mensagem para enviar</h2>
+    <div id="acertoMsgPreview" class="msg-preview" style="margin-bottom:14px"></div>
+    <div class="row">
+      <button class="btn" onclick="copiarMensagem()">Copiar mensagem</button>
+      <button class="btn secondary" onclick="enviarWhatsApp()">Enviar por WhatsApp</button>
+      <button class="btn ghost" onclick="marcarEnviado()">Marcar como enviado</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico de acertos</h2>
+    <div id="acertoHistorico"></div>
   </div>
 </section>
 
@@ -451,6 +521,39 @@
   </div>
 </div>
 
+<!-- Modal: conta fixa -->
+<div class="modal-bg" id="modalContaFixa">
+  <div class="modal">
+    <h3 id="modalContaFixaTitulo">Adicionar conta fixa</h3>
+    <div class="form-row"><label>Descrição</label><input type="text" id="cfDescricao" placeholder="Ex: Conta de luz"></div>
+    <div class="form-grid">
+      <div class="form-row"><label>Valor R$</label><input type="text" id="cfValor" placeholder="350,00"></div>
+      <div class="form-row"><label>Dia do vencimento</label><input type="number" id="cfDia" min="1" max="31" placeholder="10"></div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" onclick="salvarContaFixa()">Salvar</button>
+      <button class="btn secondary" onclick="fecharModal('modalContaFixa')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: gasto extra -->
+<div class="modal-bg" id="modalExtra">
+  <div class="modal">
+    <h3>Adicionar gasto extra</h3>
+    <div class="desc small" style="margin-bottom:12px">Gasto que você pagou e precisa informar ao Rogério no próximo acerto.</div>
+    <div class="form-row"><label>Descrição</label><input type="text" id="exDescricao" placeholder="Ex: Conserto da torneira"></div>
+    <div class="form-grid">
+      <div class="form-row"><label>Valor R$</label><input type="text" id="exValor" placeholder="150,00"></div>
+      <div class="form-row"><label>Data</label><input type="text" id="exData" placeholder="DD/MM/AAAA"></div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" onclick="salvarExtra()">Adicionar</button>
+      <button class="btn secondary" onclick="fecharModal('modalExtra')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: mesclar regras -->
 <div class="modal-bg" id="modalMerge">
   <div class="modal">
@@ -504,13 +607,13 @@ let chartBar = null, chartPie = null;
 // PERSISTÊNCIA — localStorage (cache rápido) + Google Sheets (nuvem)
 // ============================================================================
 function stateDefault() {
-  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{} };
+  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], acertos:[] };
 }
 
 function carregarStateLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) { const s = JSON.parse(raw); if (!s.orcamentos) s.orcamentos = {}; return s; }
+    if (raw) { const s = JSON.parse(raw); if (!s.orcamentos) s.orcamentos = {}; if (!s.contasFixas) s.contasFixas = []; if (!s.extras) s.extras = []; if (!s.acertos) s.acertos = []; return s; }
   } catch(e) {}
   return stateDefault();
 }
@@ -552,6 +655,9 @@ async function carregarDaNuvem() {
       if (!STATE.orcamentos) STATE.orcamentos = {};
       if (!STATE.categorias) STATE.categorias = [...CATEGORIAS_DEFAULT];
       if (!STATE.cartoesMichelle) STATE.cartoesMichelle = [...CARTOES_MICHELLE_DEFAULT];
+      if (!STATE.contasFixas) STATE.contasFixas = [];
+      if (!STATE.extras) STATE.extras = [];
+      if (!STATE.acertos) STATE.acertos = [];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
       setSyncStatus('ok', 'Sincronizado');
       return true;
@@ -823,6 +929,7 @@ document.querySelectorAll('nav button').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'historico') renderHistorico();
+    if (btn.dataset.tab === 'acerto') renderAcerto();
     if (btn.dataset.tab === 'dicionario') renderDicionario();
     if (btn.dataset.tab === 'config') renderConfig();
   };
@@ -2108,6 +2215,324 @@ function resetarTudo() {
   if (!confirm('APAGAR TODOS os dados? Essa ação não pode ser desfeita.')) return;
   if (!confirm('Última confirmação. Tem certeza?')) return;
   localStorage.removeItem(STORAGE_KEY); location.reload();
+}
+
+// ============================================================================
+// ACERTO COM ROGÉRIO
+// ============================================================================
+let editandoContaId = null;
+
+function renderAcerto() {
+  renderContasFixas();
+  renderAcertoMeses();
+  renderAcertoPreview();
+  renderAcertoHistorico();
+}
+
+// — Contas fixas —
+function renderContasFixas() {
+  const list = document.getElementById('contasFixasList');
+  if (!STATE.contasFixas.length) {
+    list.innerHTML = '<div class="empty small" style="padding:20px">Nenhuma conta fixa cadastrada.</div>';
+    return;
+  }
+  const sorted = [...STATE.contasFixas].sort((a,b) => a.dia - b.dia);
+  let html = '';
+  for (const c of sorted) {
+    const periodo = c.dia <= 15 ? '1-15' : '15-30';
+    html += `<div class="conta-row">
+      <div>${c.descricao} <span class="badge ${periodo==='1-15'?'green':'amber'}" style="font-size:10px">${periodo}</span></div>
+      <div class="num" style="font-weight:600">${fmtBRL(c.valor)}</div>
+      <div class="center">dia ${c.dia}</div>
+      <div class="center">
+        <button class="icon-btn" onclick="editarContaFixa('${c.id}')" title="Editar">✏️</button>
+        <button class="icon-btn" onclick="excluirContaFixa('${c.id}')" title="Excluir">🗑️</button>
+      </div>
+    </div>`;
+  }
+  // Totais
+  const total1 = sorted.filter(c=>c.dia<=15).reduce((s,c)=>s+c.valor,0);
+  const total2 = sorted.filter(c=>c.dia>15).reduce((s,c)=>s+c.valor,0);
+  html += `<div style="display:flex;gap:20px;padding:10px 0;font-size:13px;font-weight:600;border-top:2px solid var(--border);margin-top:4px">
+    <span>Período 1-15: ${fmtBRL(total1)}</span>
+    <span>Período 15-30: ${fmtBRL(total2)}</span>
+    <span style="margin-left:auto">Total mensal: ${fmtBRL(total1+total2)}</span>
+  </div>`;
+  list.innerHTML = html;
+}
+
+function abrirModalContaFixa() {
+  editandoContaId = null;
+  document.getElementById('modalContaFixaTitulo').textContent = 'Adicionar conta fixa';
+  document.getElementById('cfDescricao').value = '';
+  document.getElementById('cfValor').value = '';
+  document.getElementById('cfDia').value = '';
+  abrirModal('modalContaFixa');
+}
+
+function editarContaFixa(id) {
+  const c = STATE.contasFixas.find(x => x.id === id);
+  if (!c) return;
+  editandoContaId = id;
+  document.getElementById('modalContaFixaTitulo').textContent = 'Editar conta fixa';
+  document.getElementById('cfDescricao').value = c.descricao;
+  document.getElementById('cfValor').value = c.valor.toFixed(2).replace('.', ',');
+  document.getElementById('cfDia').value = c.dia;
+  abrirModal('modalContaFixa');
+}
+
+function salvarContaFixa() {
+  const descricao = document.getElementById('cfDescricao').value.trim();
+  if (!descricao) { alert('Informe a descrição.'); return; }
+  const valorStr = document.getElementById('cfValor').value.trim();
+  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
+  const dia = parseInt(document.getElementById('cfDia').value);
+  if (isNaN(dia) || dia < 1 || dia > 31) { alert('Dia inválido (1-31).'); return; }
+
+  if (editandoContaId) {
+    const c = STATE.contasFixas.find(x => x.id === editandoContaId);
+    if (c) { c.descricao = descricao; c.valor = valor; c.dia = dia; }
+  } else {
+    STATE.contasFixas.push({
+      id: 'cf_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+      descricao, valor, dia
+    });
+  }
+  salvarState(); fecharModal('modalContaFixa'); renderAcerto();
+}
+
+function excluirContaFixa(id) {
+  const c = STATE.contasFixas.find(x => x.id === id);
+  if (!confirm(`Excluir "${c.descricao}"?`)) return;
+  STATE.contasFixas = STATE.contasFixas.filter(x => x.id !== id);
+  salvarState(); renderAcerto();
+}
+
+// — Meses disponíveis —
+function renderAcertoMeses() {
+  const sel = document.getElementById('acertoMes');
+  const meses = [];
+  const hoje = new Date();
+  for (let i = -1; i <= 2; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    const label = MESES_NOME[d.getMonth()] + '/' + d.getFullYear();
+    meses.push(label);
+  }
+  sel.innerHTML = meses.map(m => `<option value="${m}">${m}</option>`).join('');
+  // Selecionar mês atual
+  const mesAtual = MESES_NOME[hoje.getMonth()] + '/' + hoje.getFullYear();
+  sel.value = mesAtual;
+
+  // Auto-selecionar período baseado no dia
+  const periodoSel = document.getElementById('acertoPeriodo');
+  periodoSel.value = hoje.getDate() < 15 ? '1-15' : '15-30';
+}
+
+// — Preview da mensagem —
+function renderAcertoPreview() {
+  const mes = document.getElementById('acertoMes')?.value;
+  const periodo = document.getElementById('acertoPeriodo')?.value;
+  if (!mes || !periodo) return;
+
+  const diaMin = periodo === '1-15' ? 1 : 15;
+  const diaMax = periodo === '1-15' ? 15 : 31;
+
+  // Contas fixas do período
+  const contasPeriodo = STATE.contasFixas
+    .filter(c => c.dia >= diaMin && c.dia <= diaMax)
+    .sort((a,b) => a.dia - b.dia);
+
+  let htmlContas = '';
+  if (!contasPeriodo.length) {
+    htmlContas = '<div class="small" style="padding:10px;color:var(--text-dim)">Nenhuma conta fixa neste período.</div>';
+  } else {
+    for (const c of contasPeriodo) {
+      htmlContas += `<div class="extra-item">
+        <div class="desc">${c.descricao} <span class="small">(dia ${c.dia})</span></div>
+        <div class="val">${fmtBRL(c.valor)}</div>
+      </div>`;
+    }
+    const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
+    htmlContas += `<div class="extra-item" style="font-weight:600;border-top:2px solid var(--border)">
+      <div class="desc">Subtotal fixas</div><div class="val">${fmtBRL(totalFixas)}</div>
+    </div>`;
+  }
+  document.getElementById('acertoContasPeriodo').innerHTML = htmlContas;
+
+  // Extras pendentes (não enviados)
+  const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado);
+  let htmlExtras = '';
+  if (!extrasPendentes.length) {
+    htmlExtras = '<div class="small" style="padding:10px;color:var(--text-dim)">Nenhum gasto extra pendente.</div>';
+  } else {
+    for (const e of extrasPendentes) {
+      htmlExtras += `<div class="extra-item">
+        <div class="desc">${e.descricao} <span class="small">(${e.data})</span></div>
+        <div class="val">${fmtBRL(e.valor)}</div>
+        <button class="icon-btn" onclick="excluirExtra('${e.id}')" title="Excluir">🗑️</button>
+      </div>`;
+    }
+    const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
+    htmlExtras += `<div class="extra-item" style="font-weight:600;border-top:2px solid var(--border)">
+      <div class="desc">Subtotal extras</div><div class="val">${fmtBRL(totalExtras)}</div>
+    </div>`;
+  }
+  document.getElementById('acertoExtras').innerHTML = htmlExtras;
+
+  // Montar mensagem
+  const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
+  const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
+  const totalGeral = totalFixas + totalExtras;
+
+  let msg = `📋 *Contas ${mes} — Período ${periodo}*\n\n`;
+
+  if (contasPeriodo.length) {
+    msg += `*Contas fixas:*\n`;
+    for (const c of contasPeriodo) {
+      msg += `  • ${c.descricao} (dia ${c.dia}) — ${fmtBRL(c.valor)}\n`;
+    }
+    msg += `  _Subtotal: ${fmtBRL(totalFixas)}_\n`;
+  }
+
+  if (extrasPendentes.length) {
+    msg += `\n*Extras que paguei:*\n`;
+    for (const e of extrasPendentes) {
+      msg += `  • ${e.descricao} (${e.data}) — ${fmtBRL(e.valor)}\n`;
+    }
+    msg += `  _Subtotal: ${fmtBRL(totalExtras)}_\n`;
+  }
+
+  msg += `\n💰 *Total: ${fmtBRL(totalGeral)}*`;
+
+  document.getElementById('acertoMsgPreview').textContent = msg;
+}
+
+// — Extras —
+function abrirModalExtra() {
+  document.getElementById('exDescricao').value = '';
+  document.getElementById('exValor').value = '';
+  const hoje = new Date();
+  document.getElementById('exData').value = hoje.toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric'});
+  abrirModal('modalExtra');
+}
+
+function salvarExtra() {
+  const descricao = document.getElementById('exDescricao').value.trim();
+  if (!descricao) { alert('Informe a descrição.'); return; }
+  const valorStr = document.getElementById('exValor').value.trim();
+  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
+  const data = document.getElementById('exData').value.trim();
+  if (!data) { alert('Informe a data.'); return; }
+
+  STATE.extras.push({
+    id: 'ex_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+    descricao, valor, data, enviado: false
+  });
+  salvarState(); fecharModal('modalExtra'); renderAcertoPreview();
+}
+
+function excluirExtra(id) {
+  STATE.extras = STATE.extras.filter(x => x.id !== id);
+  salvarState(); renderAcertoPreview();
+}
+
+// — Ações da mensagem —
+function copiarMensagem() {
+  const msg = document.getElementById('acertoMsgPreview').textContent;
+  navigator.clipboard.writeText(msg).then(() => {
+    alert('Mensagem copiada!');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = msg; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Mensagem copiada!');
+  });
+}
+
+function enviarWhatsApp() {
+  const msg = document.getElementById('acertoMsgPreview').textContent;
+  const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
+  window.open(url, '_blank');
+}
+
+function marcarEnviado() {
+  const mes = document.getElementById('acertoMes').value;
+  const periodo = document.getElementById('acertoPeriodo').value;
+  const msg = document.getElementById('acertoMsgPreview').textContent;
+
+  const diaMin = periodo === '1-15' ? 1 : 15;
+  const diaMax = periodo === '1-15' ? 15 : 31;
+  const contasPeriodo = STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax);
+  const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado);
+  const totalFixas = contasPeriodo.reduce((s,c) => s+c.valor, 0);
+  const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
+
+  // Marcar extras como enviados
+  for (const e of extrasPendentes) e.enviado = true;
+
+  // Salvar no histórico
+  STATE.acertos.push({
+    id: 'ac_' + Date.now(),
+    data: new Date().toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric'}),
+    mes, periodo, totalFixas, totalExtras,
+    total: totalFixas + totalExtras,
+    contasFixas: contasPeriodo.map(c => ({descricao: c.descricao, valor: c.valor, dia: c.dia})),
+    extras: extrasPendentes.map(e => ({descricao: e.descricao, valor: e.valor, data: e.data})),
+    mensagem: msg
+  });
+
+  salvarState(); renderAcerto();
+  alert('Acerto marcado como enviado!');
+}
+
+// — Histórico —
+function renderAcertoHistorico() {
+  const hist = document.getElementById('acertoHistorico');
+  if (!STATE.acertos || !STATE.acertos.length) {
+    hist.innerHTML = '<div class="empty small" style="padding:20px">Nenhum acerto registrado.</div>';
+    return;
+  }
+  const sorted = [...STATE.acertos].sort((a,b) => {
+    const da = a.data.split('/').reverse().join('');
+    const db = b.data.split('/').reverse().join('');
+    return db.localeCompare(da);
+  });
+  let html = `<table><thead><tr>
+    <th>Data envio</th><th>Competência</th><th>Período</th>
+    <th class="num">Fixas</th><th class="num">Extras</th><th class="num">Total</th><th class="center">Ações</th>
+  </tr></thead><tbody>`;
+  for (const a of sorted) {
+    html += `<tr>
+      <td>${a.data}</td>
+      <td>${a.mes}</td>
+      <td><span class="badge ${a.periodo==='1-15'?'green':'amber'}">${a.periodo}</span></td>
+      <td class="num">${fmtBRL(a.totalFixas)}</td>
+      <td class="num">${a.totalExtras > 0 ? fmtBRL(a.totalExtras) : '-'}</td>
+      <td class="num"><b>${fmtBRL(a.total)}</b></td>
+      <td class="center">
+        <button class="icon-btn" onclick="verMensagemAcerto('${a.id}')" title="Ver mensagem">👁️</button>
+        <button class="icon-btn" onclick="excluirAcerto('${a.id}')" title="Excluir">🗑️</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  hist.innerHTML = html;
+}
+
+function verMensagemAcerto(id) {
+  const a = STATE.acertos.find(x => x.id === id);
+  if (!a) return;
+  alert(a.mensagem);
+}
+
+function excluirAcerto(id) {
+  if (!confirm('Excluir este acerto do histórico?')) return;
+  STATE.acertos = STATE.acertos.filter(x => x.id !== id);
+  salvarState(); renderAcertoHistorico();
 }
 
 // ============================================================================
