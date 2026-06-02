@@ -2342,11 +2342,29 @@ function addContaAvulsa() {
   if (!valStr) return;
   const val = parseFloat(valStr.replace(/\./g,'').replace(',','.'));
   if (isNaN(val) || val <= 0) { alert('Valor inválido.'); return; }
-  const diaStr = prompt('Dia do vencimento:');
-  const dia = parseInt(diaStr);
-  if (isNaN(dia) || dia < 1 || dia > 31) { alert('Dia inválido.'); return; }
+  // Adiciona direto no período selecionado (sem pedir dia)
+  const periodo = document.getElementById('acertoPeriodo').value;
+  const dia = periodo === '1-15' ? 1 : 16; // Garante que cai no período certo
   contasAvulsas.push({ id: 'av_' + Date.now(), descricao: desc.trim(), valor: val, dia });
-  renderAcertoPreview();
+  // Adicionar ao HTML sem recriar tudo (preserva valores editados)
+  const container = document.getElementById('acertoContasPeriodo');
+  const subEl = document.getElementById('subtotalFixas');
+  const c = contasAvulsas[contasAvulsas.length - 1];
+  const inputId = 'acv_' + c.id;
+  const cbId = 'acb_' + c.id;
+  const novaDiv = document.createElement('div');
+  novaDiv.className = 'extra-item';
+  novaDiv.style.gap = '6px';
+  novaDiv.id = 'row_' + c.id;
+  novaDiv.innerHTML = `
+    <input type="checkbox" id="${cbId}" checked onchange="atualizarMensagem()" style="width:16px;height:16px">
+    <div class="desc" style="flex:1">${c.descricao} <span class="badge amber" style="font-size:9px">avulsa</span></div>
+    <div style="width:110px"><input type="text" id="${inputId}" value="${c.valor.toFixed(2).replace('.',',')}" onchange="atualizarMensagem()" style="width:100%;text-align:right;font-weight:600"></div>
+    <button class="icon-btn" onclick="contasAvulsas=contasAvulsas.filter(x=>x.id!=='${c.id}');document.getElementById('row_${c.id}').remove();atualizarMensagem()">🗑️</button>
+  `;
+  if (subEl) container.insertBefore(novaDiv, subEl);
+  else container.appendChild(novaDiv);
+  atualizarMensagem();
 }
 
 // — Preview da mensagem —
