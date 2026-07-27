@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Controle de Cartões — Michelle Rezende</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#8B1A1A">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cartões">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -162,6 +168,26 @@
   @media (max-width: 768px) { .acerto-periodo { grid-template-columns: 1fr; } }
   /* Inline edit */
   td.editing input { width: 100%; padding: 4px 6px; font-size: 13px; }
+  /* Badge da navegação */
+  .nav-badge { background: var(--amber); color: white; border-radius: 10px; font-size: 10px; padding: 1px 6px; margin-left: 5px; font-weight: 600; vertical-align: middle; }
+  /* Registro rápido (aba Início) */
+  .rr-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .rr-valor { font-size: 22px; font-weight: 600; width: 150px; padding: 12px 14px !important; text-align: right; }
+  .rr-desc { flex: 1; min-width: 180px; font-size: 15px; padding: 12px 14px !important; }
+  .rr-campos label { display: flex; align-items: center; gap: 6px; }
+  .rr-botoes { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  .rr-botoes .btn { flex: 1; min-width: 200px; padding: 14px 18px; font-size: 15px; font-weight: 600; }
+  .rr-botoes .btn.cartao { background: var(--green); }
+  #rrStatus { margin-top: 10px; }
+  .inicio-status-linha { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .inicio-status-linha:last-child { border-bottom: none; }
+  .inicio-status-linha .icone { font-size: 17px; }
+  .inicio-status-linha.clicavel { cursor: pointer; }
+  .inicio-status-linha.clicavel:hover { background: var(--accent-bg); }
+  @media (max-width: 480px) {
+    .rr-valor { width: 100%; text-align: left; }
+    .rr-botoes .btn { min-width: 100%; }
+  }
   /* Responsive */
   @media (max-width: 900px) {
     .charts-grid { grid-template-columns: 1fr; }
@@ -196,9 +222,10 @@
     <button class="theme-toggle" onclick="toggleDark()" title="Alternar tema claro/escuro" id="themeBtn">🌙</button>
   </div>
   <nav>
-    <button data-tab="upload" class="active">Upload de Fatura</button>
+    <button data-tab="inicio" class="active">Início</button>
+    <button data-tab="upload">Upload de Fatura</button>
     <button data-tab="historico">Histórico</button>
-    <button data-tab="acerto">Acerto</button>
+    <button data-tab="acerto">Acerto<span id="badgeAcerto" class="nav-badge" style="display:none"></span></button>
     <button data-tab="dicionario">Dicionário</button>
     <button data-tab="config">Configurações</button>
   </nav>
@@ -220,17 +247,55 @@
 
 <main style="display:none">
 
+<!-- ==================== INÍCIO ==================== -->
+<section id="panel-inicio" class="panel active">
+  <div class="card">
+    <h2>Registrar gasto agora</h2>
+    <div class="desc">Anote na hora que o gasto acontece — leva 5 segundos e você nunca mais esquece.</div>
+    <div class="rr-row">
+      <input type="text" id="rrValor" inputmode="decimal" placeholder="R$ 0,00" class="rr-valor">
+      <input type="text" id="rrDesc" placeholder="O que foi? (ex: farmácia, feira, uniforme...)" class="rr-desc">
+    </div>
+    <div class="rr-row rr-campos">
+      <label class="small">Cartão: <select id="rrCartao"></select></label>
+      <label class="small">Categoria: <select id="rrCategoria"></select></label>
+      <span class="small" style="color:var(--text-dim)">(só para gasto no cartão)</span>
+    </div>
+    <div class="rr-botoes">
+      <button class="btn" onclick="registrarGastoAcerto()">💰 É pro acerto com Rogério</button>
+      <button class="btn cartao" onclick="registrarGastoCartao()">💳 Foi no cartão</button>
+    </div>
+    <div id="rrStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Próximo acerto</h2>
+    <div id="cardProximoAcerto"></div>
+  </div>
+
+  <div class="card">
+    <h2>Pendências</h2>
+    <div id="cardPendencias"></div>
+  </div>
+
+  <div class="card" id="cardPendentesCartao" style="display:none">
+    <h2>Gastos de cartão anotados</h2>
+    <div class="desc">Aguardando a fatura chegar. Quando você importar a fatura, o sistema casa automaticamente estes gastos (por valor e data) e eles saem daqui sozinhos, já classificados.</div>
+    <div id="pendentesList"></div>
+  </div>
+</section>
+
 <!-- ==================== UPLOAD ==================== -->
-<section id="panel-upload" class="panel active">
+<section id="panel-upload" class="panel">
   <div class="card">
     <h2>Adicionar nova fatura</h2>
     <div class="desc">Faça upload do PDF da fatura do Itaú (Master ou Visa) ou CSV do Nubank. O sistema detecta os cartões e permite escolher quais contabilizar.</div>
     <div id="dropzone">
       <div class="icon">📄</div>
       <div class="label">Clique aqui ou arraste o arquivo</div>
-      <div class="sublabel">PDF (Itaú Mastercard / Visa) ou CSV (Nubank)</div>
+      <div class="sublabel">PDF (Itaú) · Excel .xlsx (fatura aberta ou fechada do Itaú) · CSV (Nubank)</div>
     </div>
-    <input type="file" id="fileInput" accept=".pdf,.csv" multiple>
+    <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx" multiple>
     <div id="uploadStatus" style="margin-top: 12px;"></div>
   </div>
   <div class="card">
@@ -250,6 +315,11 @@
     </div>
   </div>
 
+  <div id="destaquesSection" class="card" style="display:none;">
+    <h2 id="destaquesTitulo">Destaques do mês</h2>
+    <div id="destaquesList"></div>
+  </div>
+
   <div id="budgetSection" class="card" style="display:none;">
     <h2>Orçamento por competência</h2>
     <div class="desc">Selecione a competência para ver o progresso em relação aos limites definidos.</div>
@@ -257,6 +327,18 @@
       <label class="small">Competência: <select id="budgetMes" onchange="renderBudget()"></select></label>
     </div>
     <div id="budgetGrid" class="budget-grid"></div>
+  </div>
+
+  <div id="parcelasSection" class="card" style="display:none;">
+    <h2>Parcelas futuras</h2>
+    <div class="desc">Compras parceladas que ainda vão cair nas próximas faturas, projetadas a partir das faturas já importadas. Toque num mês para ver o detalhe.</div>
+    <div id="parcelasFuturas"></div>
+  </div>
+
+  <div id="assinaturasSection" class="card" style="display:none;">
+    <h2>Assinaturas e recorrências</h2>
+    <div class="desc">Cobranças que se repetem todo mês com valor parecido. O sistema avisa quando um valor sobe, vem cobrança repetida ou uma assinatura deixa de aparecer.</div>
+    <div id="assinaturasList"></div>
   </div>
 
   <div class="charts-grid">
@@ -281,7 +363,10 @@
   </div>
 
   <div class="card">
-    <h2>Lançamentos</h2>
+    <div class="row" style="margin-bottom:12px">
+      <h2 style="margin:0">Lançamentos</h2>
+      <button class="btn sm ghost" onclick="gerarLinkCompartilhar()" style="margin-left:auto">🔗 Compartilhar com Rogério</button>
+    </div>
     <div id="bulkBar" class="bulk-bar" style="display:none;">
       <span class="count" id="bulkCount">0</span> selecionados
       <select id="bulkCat"></select>
@@ -289,6 +374,7 @@
       <button class="btn sm secondary" onclick="limparBulk()" style="background:rgba(255,255,255,0.2);border:none;color:white;">Cancelar</button>
     </div>
     <div class="filters">
+      <label>Vencimento: <select id="filterVenc"><option value="">Todos</option></select></label>
       <label>Competência: <select id="filterMes"><option value="">Todas</option></select></label>
       <label>Categoria: <select id="filterCat"><option value="">Todas</option></select></label>
       <label>Cartão: <select id="filterCartao"><option value="">Todos</option></select></label>
@@ -321,7 +407,7 @@
       <label class="small">Período:
         <select id="acertoPeriodo" onchange="renderAcertoPreview()">
           <option value="1-15">Dia 1 a 15</option>
-          <option value="15-30">Dia 15 a 30</option>
+          <option value="15-30">Dia 16 a 31</option>
         </select>
       </label>
     </div>
@@ -444,7 +530,7 @@
     <div id="modalCartoesList" class="cartao-list"></div>
     <div class="row" style="margin-top: 18px;">
       <button class="btn" onclick="processarFaturaSelecionada()">Continuar</button>
-      <button class="btn secondary" onclick="fecharModal('modalCartoes')">Cancelar</button>
+      <button class="btn secondary" onclick="cancelarFluxoFatura('modalCartoes')">Cancelar</button>
     </div>
   </div>
 </div>
@@ -458,7 +544,7 @@
     <div id="classificarTable" style="max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;"></div>
     <div class="row" style="margin-top: 16px;">
       <button class="btn" onclick="salvarFatura()">Salvar no histórico</button>
-      <button class="btn secondary" onclick="fecharModal('modalClassificar')">Cancelar</button>
+      <button class="btn secondary" onclick="cancelarFluxoFatura('modalClassificar')">Cancelar</button>
       <span class="small right" id="classificarTotal"></span>
     </div>
   </div>
@@ -557,6 +643,33 @@
   </div>
 </div>
 
+<!-- Modal: conta avulsa -->
+<div class="modal-bg" id="modalAvulsa">
+  <div class="modal">
+    <h3>Conta avulsa deste período</h3>
+    <div class="desc small" style="margin-bottom:12px">Conta que aparece só neste acerto (não se repete todo mês). Fica salva até você marcar o acerto como enviado.</div>
+    <div class="form-row"><label>Descrição</label><input type="text" id="avDescricao" placeholder="Ex: Conserto do portão"></div>
+    <div class="form-row"><label>Valor R$</label><input type="text" id="avValor" placeholder="150,00"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" onclick="salvarContaAvulsa()">Adicionar</button>
+      <button class="btn secondary" onclick="fecharModal('modalAvulsa')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: ver / reenviar mensagem de acerto -->
+<div class="modal-bg" id="modalVerAcerto">
+  <div class="modal">
+    <h3>Mensagem do acerto</h3>
+    <div id="vaMsg" class="msg-preview" style="margin-bottom:14px"></div>
+    <div class="row">
+      <button class="btn" onclick="copiarMensagemAcerto()">Copiar mensagem</button>
+      <button class="btn secondary" onclick="reenviarWhatsAppAcerto()">Enviar por WhatsApp</button>
+      <button class="btn ghost" onclick="fecharModal('modalVerAcerto')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: mesclar regras -->
 <div class="modal-bg" id="modalMerge">
   <div class="modal">
@@ -603,36 +716,156 @@ const ITAU_PARA_MICHELLE = {
 
 let STATE = carregarStateLocal();
 let FATURA_TEMP = null;
+// Fila de upload: resolve a Promise do arquivo atual quando a revisão termina
+let resolverFluxoAtual = null;
+function finalizarFluxoFatura() {
+  if (resolverFluxoAtual) { const r = resolverFluxoAtual; resolverFluxoAtual = null; r(); }
+}
+function cancelarFluxoFatura(modalId) {
+  fecharModal(modalId);
+  FATURA_TEMP = null;
+  finalizarFluxoFatura();
+}
 let bulkSelected = new Set();
 let chartBar = null, chartPie = null;
+let sortCol = 'competencia', sortDir = -1;
 
 // ============================================================================
 // PERSISTÊNCIA — localStorage (cache rápido) + Google Sheets (nuvem)
 // ============================================================================
 function stateDefault() {
-  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], acertos:[] };
+  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], avulsas:[], acertos:[], pendentes:[], lixeira:{}, updatedAt:0 };
+}
+
+function normalizarEstado(s) {
+  if (!s || typeof s !== 'object') return stateDefault();
+  if (!s.faturas) s.faturas = [];
+  if (!s.dicionario) s.dicionario = {...DICT_INICIAL};
+  if (!s.orcamentos) s.orcamentos = {};
+  if (!s.categorias) s.categorias = [...CATEGORIAS_DEFAULT];
+  if (!s.cartoesMichelle) s.cartoesMichelle = [...CARTOES_MICHELLE_DEFAULT];
+  if (!s.contasFixas) s.contasFixas = [];
+  if (!s.extras) s.extras = [];
+  if (!s.avulsas) s.avulsas = [];
+  if (!s.acertos) s.acertos = [];
+  if (!s.pendentes) s.pendentes = [];
+  if (!s.lixeira) s.lixeira = {};
+  if (!s.updatedAt) s.updatedAt = 0;
+  // Extras antigos sem acerto de destino: calcula pela data que foi pago
+  for (const e of s.extras) {
+    if (!e.mesDestino && e.data) {
+      const d = proximoAcertoDe(e.data);
+      if (d) { e.mesDestino = d.mes; e.periodoDestino = d.periodo; }
+    }
+  }
+  return s;
+}
+
+// Acerto em que um gasto pago em `dataStr` (DD/MM/AAAA) deve ser cobrado:
+// pago na 1ª quinzena → acerto 15-30 do mesmo mês; na 2ª quinzena → 1-15 do mês seguinte.
+function proximoAcertoDe(dataStr) {
+  // array local: esta função roda na carga inicial, antes de MESES_NOME existir
+  const MZ = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const p = (dataStr || '').split('/');
+  if (p.length < 3) return null;
+  let dia = parseInt(p[0], 10), mes = parseInt(p[1], 10), ano = parseInt(p[2], 10);
+  if (!dia || !mes || !ano || mes < 1 || mes > 12) return null;
+  let mesIdx = mes - 1, periodo;
+  if (dia <= 15) { periodo = '15-30'; }
+  else { periodo = '1-15'; mesIdx++; if (mesIdx > 11) { mesIdx = 0; ano++; } }
+  return { mes: MZ[mesIdx] + '/' + ano, periodo };
+}
+
+function destinoDoExtra(e) {
+  if (e.mesDestino && e.periodoDestino) return { mes: e.mesDestino, periodo: e.periodoDestino };
+  return proximoAcertoDe(e.data);
+}
+
+function acertoAtual() {
+  const h = new Date();
+  return { mes: MESES_NOME[h.getMonth()] + '/' + h.getFullYear(), periodo: h.getDate() <= 15 ? '1-15' : '15-30' };
+}
+
+function extraDesteAcerto(e, mes, periodo) {
+  const d = destinoDoExtra(e) || acertoAtual(); // sem data válida → ancora no acerto de hoje (um só)
+  return d.mes === mes && d.periodo === periodo;
+}
+
+// Move o acerto de destino de um extra uma quinzena pra frente (+1) ou pra trás (-1)
+function deslocarAcerto(d, dir) {
+  const p = d.mes.split('/');
+  let mesIdx = MESES_NOME.indexOf(p[0]), ano = parseInt(p[1], 10);
+  let periodo = d.periodo;
+  if (dir > 0) {
+    if (periodo === '1-15') periodo = '15-30';
+    else { periodo = '1-15'; mesIdx++; if (mesIdx > 11) { mesIdx = 0; ano++; } }
+  } else {
+    if (periodo === '15-30') periodo = '1-15';
+    else { periodo = '15-30'; mesIdx--; if (mesIdx < 0) { mesIdx = 11; ano--; } }
+  }
+  return { mes: MESES_NOME[mesIdx] + '/' + ano, periodo };
+}
+
+function moverExtraAcerto(id, dir) {
+  const e = STATE.extras.find(x => x.id === id);
+  if (!e) return;
+  const atual = destinoDoExtra(e) || { mes: document.getElementById('acertoMes').value, periodo: document.getElementById('acertoPeriodo').value };
+  const novo = deslocarAcerto(atual, dir);
+  e.mesDestino = novo.mes; e.periodoDestino = novo.periodo; e.updatedAt = Date.now();
+  salvarState();
+  atualizarAcertoPreservandoAjustes();
 }
 
 function carregarStateLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) { const s = JSON.parse(raw); if (!s.orcamentos) s.orcamentos = {}; if (!s.contasFixas) s.contasFixas = []; if (!s.extras) s.extras = []; if (!s.acertos) s.acertos = []; return s; }
+    if (raw) return normalizarEstado(JSON.parse(raw));
   } catch(e) {}
   return stateDefault();
 }
 
+// Registra uma exclusão na lixeira para que o merge não ressuscite o item
+function lixeiraAdd(tipo, id) {
+  if (!STATE.lixeira) STATE.lixeira = {};
+  if (!STATE.lixeira[tipo]) STATE.lixeira[tipo] = [];
+  STATE.lixeira[tipo].push({ id, ts: Date.now() });
+}
+
+// Tira da lixeira — chamado quando um item com a mesma chave é recriado
+// de propósito (senão o merge o apagaria de novo)
+function lixeiraRemove(tipo, id) {
+  if (STATE.lixeira && STATE.lixeira[tipo]) {
+    STATE.lixeira[tipo] = STATE.lixeira[tipo].filter(x => x.id !== id);
+  }
+}
+
 function salvarState() {
-  // Salva local imediatamente (rápido)
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch(e) {}
+  STATE.updatedAt = Date.now();
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+    // A flag guarda o updatedAt pendente — a resposta de um sync antigo
+    // não pode apagar a marca de uma edição mais nova
+    localStorage.setItem('cc_sync_pendente', String(STATE.updatedAt));
+  } catch(e) {
+    alert('Atenção: não foi possível salvar neste aparelho (armazenamento cheio). Baixe um backup em Configurações.');
+  }
   atualizarStorageInfo();
   // Agenda sync para nuvem (debounce 2s)
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => syncParaNuvem(), 2000);
 }
 
+let syncTentativas = 0;
+
+function limparFlagSync(enviadoAt) {
+  const pendente = parseInt(localStorage.getItem('cc_sync_pendente') || '0');
+  if (pendente <= enviadoAt) localStorage.removeItem('cc_sync_pendente');
+}
+
 async function syncParaNuvem() {
-  if (!SESSAO) return;
+  if (!SESSAO) return false;
   setSyncStatus('syncing', 'Salvando...');
+  const enviadoAt = STATE.updatedAt || 0;
   try {
     const resp = await fetch(SCRIPT_URL, {
       method: 'POST', redirect: 'follow',
@@ -640,11 +873,163 @@ async function syncParaNuvem() {
       body: JSON.stringify({ tipo: 'save', sessao: SESSAO, dados: STATE })
     });
     const r = await resp.json();
-    if (r.ok) setSyncStatus('ok', 'Salvo na nuvem');
-    else setSyncStatus('erro', r.erro || 'Erro ao salvar');
+    if (r.ok) {
+      syncTentativas = 0;
+      limparFlagSync(enviadoAt);
+      setSyncStatus('ok', 'Salvo na nuvem');
+      return true;
+    } else if (r.erro && r.erro.includes('Sessão')) {
+      setSyncStatus('erro', 'Sessão expirada');
+      alert('Sua sessão expirou. Entre novamente com o PIN — suas alterações estão salvas neste aparelho e serão enviadas após o login.');
+      logout();
+      return false;
+    } else {
+      agendarRetrySync(r.erro || 'Erro ao salvar');
+      return false;
+    }
   } catch(e) {
-    setSyncStatus('erro', 'Sem conexão — salvo localmente');
+    agendarRetrySync('Sem conexão');
+    return false;
   }
+}
+
+function agendarRetrySync(motivo) {
+  syncTentativas++;
+  const delay = Math.min(5000 * Math.pow(2, syncTentativas - 1), 120000);
+  setSyncStatus('erro', `⚠ ${motivo} — tentando de novo em ${Math.round(delay/1000)}s`);
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncParaNuvem(), delay);
+}
+
+// Tentativa extra de envio quando o app vai para segundo plano
+// (o debounce de 2s pode não disparar com a aba congelada no celular).
+// Melhor esforço: NÃO cancela o timer normal — se o keepalive falhar
+// (ex.: corpo acima de 64KB), o fluxo padrão continua valendo.
+function flushSyncPendente() {
+  if (!SESSAO || !localStorage.getItem('cc_sync_pendente')) return;
+  const enviadoAt = STATE.updatedAt || 0;
+  try {
+    fetch(SCRIPT_URL, {
+      method: 'POST', redirect: 'follow', keepalive: true,
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ tipo: 'save', sessao: SESSAO, dados: STATE })
+    }).then(r => r.json()).then(r => { if (r.ok) limparFlagSync(enviadoAt); }).catch(() => {});
+  } catch(e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { flushSyncPendente(); return; }
+  // Ao voltar pro app: repuxa da nuvem (traz gastos inseridos pelo bot / outro aparelho).
+  // Só se logado, sem sync pendente e sem modal aberto (não atrapalha edição em curso).
+  if (SESSAO && !localStorage.getItem('cc_sync_pendente') && !document.querySelector('.modal-bg.show')) {
+    carregarDaNuvem().then(() => renderAbaAtiva()).catch(() => {});
+  }
+});
+window.addEventListener('pagehide', flushSyncPendente);
+
+function renderAbaAtiva() {
+  const ativa = document.querySelector('nav button.active');
+  if (!ativa) return;
+  const tab = ativa.dataset.tab;
+  if (tab === 'inicio') renderInicio();
+  else if (tab === 'historico') renderHistorico();
+  else if (tab === 'acerto') renderAcerto();
+  else if (tab === 'dicionario') renderDicionario();
+  else if (tab === 'config') renderConfig();
+  else if (tab === 'upload') renderFaturasList();
+}
+
+// Mescla o estado local com o da nuvem sem perder nada de nenhum dos lados.
+// Base = o lado mais recente (updatedAt); coleções com ID são unidas item a item;
+// a lixeira impede que itens excluídos num aparelho voltem pelo outro.
+function mesclarEstados(local, nuvem) {
+  const a = normalizarEstado(local), b = normalizarEstado(nuvem);
+  // Empate (ex.: estados antigos sem updatedAt): a NUVEM vence — ela é o
+  // ponto de agregação onde o último aparelho sincronizado gravou
+  const base = (a.updatedAt || 0) > (b.updatedAt || 0) ? a : b;
+  const outro = base === a ? b : a;
+  const resultado = JSON.parse(JSON.stringify(base));
+  let precisaSync = (a.updatedAt || 0) > (b.updatedAt || 0);
+
+  // Lixeira: união dos dois lados, itens de mais de 90 dias saem
+  const CORTE = Date.now() - 90*24*60*60*1000;
+  const TIPOS_LIXEIRA = ['faturas','extras','avulsas','acertos','contasFixas','pendentes','dicionario','categorias','cartoesMichelle','orcamentos'];
+  resultado.lixeira = {};
+  for (const tipo of TIPOS_LIXEIRA) {
+    const mapa = new Map();
+    for (const item of [...(a.lixeira[tipo]||[]), ...(b.lixeira[tipo]||[])]) {
+      if (item && item.ts > CORTE) mapa.set(item.id, item);
+    }
+    resultado.lixeira[tipo] = [...mapa.values()];
+  }
+  const excluidos = tipo => new Set(resultado.lixeira[tipo].map(x => x.id));
+
+  // Coleções por ID: item só de um lado entra; presente nos dois, vence o mais novo
+  const mesclarColecao = (campo, tipoLixeira) => {
+    const del = excluidos(tipoLixeira);
+    const mapa = new Map();
+    for (const item of resultado[campo]) if (!del.has(item.id)) mapa.set(item.id, item);
+    let mudou = resultado[campo].length !== mapa.size;
+    for (const item of (outro[campo] || [])) {
+      if (del.has(item.id)) continue;
+      const atual = mapa.get(item.id);
+      if (!atual) { mapa.set(item.id, item); mudou = true; }
+      else if ((item.updatedAt || 0) > (atual.updatedAt || 0)) { mapa.set(item.id, item); mudou = true; }
+    }
+    resultado[campo] = [...mapa.values()];
+    if (mudou) precisaSync = true;
+  };
+  mesclarColecao('faturas', 'faturas');
+  mesclarColecao('contasFixas', 'contasFixas');
+  mesclarColecao('acertos', 'acertos');
+  mesclarColecao('pendentes', 'pendentes');
+
+  // Extras e avulsas: união por ID; vence o mais recente (updatedAt) por item,
+  // mas "enviado" é pegajoso (se um lado marcou enviado, fica enviado — evita cobrar 2x).
+  const mesclarComEnviado = (campo) => {
+    const del = excluidos(campo);
+    const mapa = new Map();
+    for (const item of resultado[campo]) if (!del.has(item.id)) mapa.set(item.id, item);
+    for (const item of (outro[campo] || [])) {
+      if (del.has(item.id)) continue;
+      const atual = mapa.get(item.id);
+      if (!atual) { mapa.set(item.id, item); precisaSync = true; }
+      else {
+        const enviado = atual.enviado || item.enviado;
+        const vencedor = (item.updatedAt || 0) > (atual.updatedAt || 0) ? item : atual;
+        const merged = enviado === vencedor.enviado ? vencedor : {...vencedor, enviado};
+        mapa.set(item.id, merged);
+        if (vencedor === item || merged.enviado !== atual.enviado) precisaSync = true;
+      }
+    }
+    resultado[campo] = [...mapa.values()];
+  };
+  mesclarComEnviado('extras');
+  mesclarComEnviado('avulsas');
+
+  // Dicionário / categorias / cartões / orçamentos: chaves só do outro lado
+  // entram — exceto as que foram removidas de propósito (lixeira por chave)
+  const delDic = excluidos('dicionario');
+  for (const [k, v] of Object.entries(outro.dicionario || {})) {
+    if (!resultado.dicionario[k] && !delDic.has(k)) { resultado.dicionario[k] = v; precisaSync = true; }
+  }
+  for (const k of delDic) if (resultado.dicionario[k]) { delete resultado.dicionario[k]; precisaSync = true; }
+
+  const delCat = excluidos('categorias');
+  for (const c of (outro.categorias || [])) if (!resultado.categorias.includes(c) && !delCat.has(c)) { resultado.categorias.push(c); precisaSync = true; }
+  if (resultado.categorias.some(c => delCat.has(c))) { resultado.categorias = resultado.categorias.filter(c => !delCat.has(c)); precisaSync = true; }
+
+  const delCart = excluidos('cartoesMichelle');
+  for (const c of (outro.cartoesMichelle || [])) if (!resultado.cartoesMichelle.includes(c) && !delCart.has(c)) { resultado.cartoesMichelle.push(c); precisaSync = true; }
+  if (resultado.cartoesMichelle.some(c => delCart.has(c))) { resultado.cartoesMichelle = resultado.cartoesMichelle.filter(c => !delCart.has(c)); precisaSync = true; }
+
+  const delOrc = excluidos('orcamentos');
+  for (const [k, v] of Object.entries(outro.orcamentos || {})) {
+    if (resultado.orcamentos[k] == null && !delOrc.has(k)) { resultado.orcamentos[k] = v; precisaSync = true; }
+  }
+  for (const k of delOrc) if (resultado.orcamentos[k] != null) { delete resultado.orcamentos[k]; precisaSync = true; }
+
+  resultado.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  return { estado: resultado, precisaSync };
 }
 
 async function carregarDaNuvem() {
@@ -653,23 +1038,24 @@ async function carregarDaNuvem() {
   try {
     const resp = await fetch(`${SCRIPT_URL}?action=load&sessao=${SESSAO}`, { redirect: 'follow' });
     const r = await resp.json();
-    if (r.ok && r.dados && r.dados.faturas) {
-      STATE = r.dados;
-      if (!STATE.orcamentos) STATE.orcamentos = {};
-      if (!STATE.categorias) STATE.categorias = [...CATEGORIAS_DEFAULT];
-      if (!STATE.cartoesMichelle) STATE.cartoesMichelle = [...CARTOES_MICHELLE_DEFAULT];
-      if (!STATE.contasFixas) STATE.contasFixas = [];
-      if (!STATE.extras) STATE.extras = [];
-      if (!STATE.acertos) STATE.acertos = [];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
-      setSyncStatus('ok', 'Sincronizado');
-      return true;
-    } else if (r.ok && (!r.dados || !r.dados.faturas)) {
-      // Nuvem vazia — envia dados locais pra lá
-      if (STATE.faturas.length > 0) {
-        await syncParaNuvem();
+    if (r.ok) {
+      // Nuvem "presente" se tiver qualquer conteúdo — inclusive só dados vindos
+      // do bot (pendentes/extras) antes de qualquer fatura ter sido importada
+      const d = r.dados;
+      const temConteudo = d && (d.faturas || d.pendentes || d.extras || d.contasFixas || d.acertos || d.updatedAt);
+      const nuvem = temConteudo ? d : null;
+      if (!nuvem) {
+        // Nuvem vazia — envia dados locais pra lá se houver qualquer coisa
+        STATE = normalizarEstado(STATE);
+        if (STATE.updatedAt > 0 || localStorage.getItem('cc_sync_pendente')) await syncParaNuvem();
+        else setSyncStatus('ok', 'Sincronizado');
+        return true;
       }
-      setSyncStatus('ok', 'Sincronizado');
+      const { estado, precisaSync } = mesclarEstados(STATE, nuvem);
+      STATE = estado;
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE)); } catch(e) {}
+      if (precisaSync || localStorage.getItem('cc_sync_pendente')) await syncParaNuvem();
+      else setSyncStatus('ok', 'Sincronizado');
       return true;
     } else {
       setSyncStatus('erro', r.erro || 'Erro');
@@ -696,6 +1082,7 @@ function atualizarStorageInfo() {
   const size = new Blob([JSON.stringify(STATE)]).size;
   const el = document.getElementById('storageInfo');
   if (el) el.textContent = `Dados: ${(size/1024).toFixed(1)} KB · ${STATE.faturas.length} faturas · ${Object.keys(STATE.dicionario).length} regras`;
+  if (typeof atualizarBadgeAcerto === 'function') atualizarBadgeAcerto();
 }
 
 // ============================================================================
@@ -742,6 +1129,7 @@ function mostrarApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.querySelector('main').style.display = 'block';
   document.getElementById('btnLogout').style.display = 'inline-block';
+  renderInicio();
   renderFaturasList();
   atualizarStorageInfo();
 }
@@ -931,6 +1319,7 @@ document.querySelectorAll('nav button').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'inicio') renderInicio();
     if (btn.dataset.tab === 'historico') renderHistorico();
     if (btn.dataset.tab === 'acerto') renderAcerto();
     if (btn.dataset.tab === 'dicionario') renderDicionario();
@@ -941,9 +1330,175 @@ document.querySelectorAll('nav button').forEach(btn => {
 function abrirModal(id) { document.getElementById(id).classList.add('show'); }
 function fecharModal(id) { document.getElementById(id).classList.remove('show'); }
 
-// Fechar modal ao clicar fora
+function irParaAba(tab) {
+  const btn = document.querySelector(`nav button[data-tab="${tab}"]`);
+  if (btn) btn.click();
+}
+
+// ============================================================================
+// ABA INÍCIO — registro rápido + status
+// ============================================================================
+function hojeBR() {
+  return new Date().toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric'});
+}
+
+function lerRegistroRapido() {
+  const valorStr = document.getElementById('rrValor').value.replace(/R\$\s*/i,'').trim();
+  const valor = parseFloat(valorStr.replace(/\./g,'').replace(',','.'));
+  const desc = document.getElementById('rrDesc').value.trim();
+  if (isNaN(valor) || valor <= 0) { alert('Digite o valor do gasto.'); return null; }
+  if (!desc) { alert('Descreva o gasto em poucas palavras.'); return null; }
+  return { valor, desc };
+}
+
+function rrFeedback(msg) {
+  document.getElementById('rrValor').value = '';
+  document.getElementById('rrDesc').value = '';
+  const st = document.getElementById('rrStatus');
+  st.innerHTML = `<div class="alert success">${msg}</div>`;
+  setTimeout(() => { st.innerHTML = ''; }, 3500);
+}
+
+function registrarGastoAcerto() {
+  const r = lerRegistroRapido();
+  if (!r) return;
+  const dataHoje = hojeBR();
+  const dest = proximoAcertoDe(dataHoje) || {};
+  STATE.extras.push({
+    id: 'ex_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+    descricao: r.desc, valor: r.valor, data: dataHoje, enviado: false,
+    mesDestino: dest.mes || null, periodoDestino: dest.periodo || null, updatedAt: Date.now()
+  });
+  salvarState();
+  const quando = dest.mes ? `no acerto de ${dest.mes} (${dest.periodo})` : 'no próximo acerto';
+  rrFeedback(`✓ Anotado! "${r.desc}" (${fmtBRL(r.valor)}) entra ${quando} com o Rogério.`);
+  renderInicio();
+}
+
+function registrarGastoCartao() {
+  const r = lerRegistroRapido();
+  if (!r) return;
+  STATE.pendentes.push({
+    id: 'pd_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+    data: hojeBR(), estabelecimento: r.desc, valor: r.valor,
+    cartao: document.getElementById('rrCartao').value,
+    categoria: document.getElementById('rrCategoria').value,
+    conciliado: false, updatedAt: Date.now()
+  });
+  salvarState();
+  rrFeedback(`✓ Anotado! "${r.desc}" (${fmtBRL(r.valor)}) fica aguardando a fatura do cartão.`);
+  renderInicio();
+}
+
+function excluirPendente(id) {
+  lixeiraAdd('pendentes', id);
+  STATE.pendentes = STATE.pendentes.filter(x => x.id !== id);
+  salvarState(); renderInicio();
+}
+
+function setPendenteCategoria(id, cat) {
+  const p = STATE.pendentes.find(x => x.id === id);
+  if (p) { p.categoria = cat; p.updatedAt = Date.now(); salvarState(); }
+}
+
+function renderInicio() {
+  // Selects do registro rápido
+  const selCartao = document.getElementById('rrCartao');
+  const cartoes = [...STATE.cartoesMichelle, 'NUBANK'];
+  const cartaoAtual = selCartao.value;
+  selCartao.innerHTML = cartoes.map(c => `<option value="${c}">${c==='NUBANK'?'Nubank':'final '+c}</option>`).join('');
+  if (cartoes.includes(cartaoAtual)) selCartao.value = cartaoAtual;
+  const selCat = document.getElementById('rrCategoria');
+  const catAtual = selCat.value;
+  selCat.innerHTML = '<option value="??">?? (decido depois)</option>' + STATE.categorias.slice().sort().map(c => `<option value="${c}">${c}</option>`).join('');
+  if (catAtual) selCat.value = catAtual;
+
+  // Card: próximo acerto
+  const hoje = new Date();
+  const dia = hoje.getDate();
+  const mesLabel = MESES_NOME[hoje.getMonth()] + '/' + hoje.getFullYear();
+  const periodoAtual = dia <= 15 ? '1-15' : '15-30';
+  const rotuloAtual = periodoAtual === '1-15' ? '1 a 15' : '16 a 31';
+  const enviado = (STATE.acertos||[]).some(a => a.mes === mesLabel && a.periodo === periodoAtual);
+  const extrasPend = (STATE.extras||[]).filter(e => !e.enviado);
+  const totExtras = extrasPend.reduce((s,e) => s+e.valor, 0);
+  let proxEnvio;
+  if (dia < 15) proxEnvio = new Date(hoje.getFullYear(), hoje.getMonth(), 15);
+  else proxEnvio = new Date(hoje.getFullYear(), hoje.getMonth()+1, 1);
+  const diasFaltam = Math.max(0, Math.ceil((proxEnvio - hoje) / 86400000));
+
+  let html = '';
+  html += `<div class="inicio-status-linha"><span class="icone">${enviado?'✅':'⏳'}</span>
+    <span>Acerto <b>${rotuloAtual}</b> de ${mesLabel}: ${enviado?'<b style="color:var(--green)">já enviado</b>':'<b style="color:var(--amber)">ainda não enviado</b>'}</span></div>`;
+  html += `<div class="inicio-status-linha"><span class="icone">💰</span>
+    <span>${extrasPend.length ? `<b>${extrasPend.length}</b> gasto(s) extra(s) anotado(s) — <b>${fmtBRL(totExtras)}</b> a cobrar` : 'Nenhum gasto extra pendente'}</span></div>`;
+  html += `<div class="inicio-status-linha"><span class="icone">📅</span>
+    <span>Próxima prévia por email: <b>${proxEnvio.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})}</b> (${diasFaltam === 0 ? 'hoje' : 'em ' + diasFaltam + ' dia' + (diasFaltam>1?'s':'')})</span></div>`;
+  html += `<div style="margin-top:12px"><button class="btn" onclick="irParaAba('acerto')">Revisar e enviar acerto</button></div>`;
+  document.getElementById('cardProximoAcerto').innerHTML = html;
+
+  // Card: pendências
+  const semCat = todasTransacoes().filter(t => (t.categoria||'??') === '??').length;
+  const vencs = STATE.faturas.map(f => f.venc).filter(Boolean);
+  let faturaMesFalta = false;
+  if (vencs.length) {
+    const chaves = vencs.map(v => { const p = v.split('/'); return parseInt(p[2]) * 100 + parseInt(p[1]); });
+    const chaveAtual = hoje.getFullYear() * 100 + (hoje.getMonth()+1);
+    faturaMesFalta = Math.max(...chaves) < chaveAtual;
+  }
+  let pend = '';
+  if (semCat > 0) pend += `<div class="inicio-status-linha clicavel" onclick="irParaAba('historico')"><span class="icone">🏷️</span>
+    <span><b>${semCat}</b> lançamento(s) sem categoria — toque para classificar</span></div>`;
+  if (faturaMesFalta) pend += `<div class="inicio-status-linha clicavel" onclick="irParaAba('upload')"><span class="icone">📄</span>
+    <span>Nenhuma fatura com vencimento em <b>${mesLabel}</b> importada ainda — toque para enviar</span></div>`;
+  if (!pend) pend = `<div class="inicio-status-linha"><span class="icone">✅</span><span>Tudo em dia — nenhuma pendência!</span></div>`;
+  document.getElementById('cardPendencias').innerHTML = pend;
+
+  // Card: gastos de cartão anotados (aguardando a fatura chegar p/ conciliar)
+  const cardPd = document.getElementById('cardPendentesCartao');
+  const pendentes = (STATE.pendentes || []).filter(p => !p.conciliado);
+  if (!pendentes.length) {
+    cardPd.style.display = 'none';
+  } else {
+    cardPd.style.display = 'block';
+    const cats = STATE.categorias.slice().sort();
+    document.getElementById('pendentesList').innerHTML = pendentes.map(p => {
+      const antigo = idadeEmDias(p.data) > 40;
+      return `
+      <div class="extra-item" style="gap:8px">
+        <div class="desc">${p.estabelecimento} <span class="small">(${p.data} · ${p.cartao ? (p.cartao==='NUBANK'?'Nubank':'final '+p.cartao) : 'cartão a definir'})</span>${antigo?' <span class="badge amber" style="font-size:9px" title="Anotado há mais de 40 dias e ainda não casou com nenhuma fatura. Se foi parcelado, é normal (a fatura mostra só a parcela). Senão, confira se a fatura foi importada ou se foi pago de outra forma.">⚠ antigo</span>':''}</div>
+        <select onchange="setPendenteCategoria('${p.id}', this.value)" style="max-width:140px">
+          <option value="??" ${p.categoria==='??'?'selected':''}>??</option>
+          ${cats.map(c => `<option value="${c}" ${p.categoria===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <div class="val">${fmtBRL(p.valor)}</div>
+        <button class="icon-btn" onclick="excluirPendente('${p.id}')" title="Excluir">🗑️</button>
+      </div>`;}).join('') +
+      `<div class="extra-item" style="font-weight:600;border-top:2px solid var(--border)">
+        <div class="desc">Total anotado</div><div class="val">${fmtBRL(pendentes.reduce((s,p)=>s+p.valor,0))}</div>
+      </div>`;
+  }
+
+  atualizarBadgeAcerto();
+}
+
+function atualizarBadgeAcerto() {
+  const el = document.getElementById('badgeAcerto');
+  if (!el) return;
+  const n = (STATE.extras||[]).filter(e => !e.enviado).length
+          + (STATE.avulsas||[]).filter(a => !a.enviado).length;
+  el.style.display = n > 0 ? 'inline-block' : 'none';
+  el.textContent = n;
+}
+
+// Fechar modal ao clicar fora — exceto os do fluxo de fatura,
+// onde um clique acidental descartaria a revisão inteira
 document.querySelectorAll('.modal-bg').forEach(bg => {
-  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('show'); });
+  bg.addEventListener('click', e => {
+    if (e.target !== bg) return;
+    if (bg.id === 'modalClassificar' || bg.id === 'modalCartoes') return;
+    bg.classList.remove('show');
+  });
 });
 
 // ============================================================================
@@ -1079,6 +1634,54 @@ function parseItau(linhas) {
 }
 
 // ============================================================================
+// PARSER EXCEL (Itaú — fatura aberta/parcial ou fechada exportada em .xlsx)
+// Cada linha traz o número do cartão, então agrupamos por cartão direto.
+// ============================================================================
+async function parseItauExcel(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+
+  let aberta = false, vencDate = null, totalDeclarado = null;
+  for (const r of rows) for (const c of (r || [])) {
+    if (typeof c === 'string' && /fatura\s+aberta/i.test(c)) aberta = true;
+  }
+  // Subtotal: linha que contém a palavra "Subtotal" e um número
+  for (const r of rows) {
+    if (r && r.some(c => typeof c === 'string' && /^\s*subtotal/i.test(c))) {
+      const n = r.find(x => typeof x === 'number'); if (n != null) totalDeclarado = n;
+    }
+  }
+  // Vencimento: primeira linha do cabeçalho com "final NNNN" que tenha uma data
+  for (const r of rows) {
+    if (r && r.some(c => typeof c === 'string' && /final\s+\d{4}/i.test(c))) {
+      const d = r.find(c => c instanceof Date); if (d) { vencDate = d; break; }
+    }
+  }
+  const lancHeaderIdx = rows.findIndex(r => r && r.some(c => c === 'Data'));
+  const cartoes = {};
+  for (let i = lancHeaderIdx + 1; i < rows.length; i++) {
+    const r = rows[i]; if (!r) continue;
+    const data = r[1], desc = (r[2] == null ? '' : String(r[2])).trim(), parc = r[3], valor = r[4], cardRaw = r[9];
+    if (!(data instanceof Date)) continue;
+    if (cardRaw == null || typeof valor !== 'number') continue;
+    if (/pagamento\s+efetuado/i.test(desc)) continue; // pagamento da fatura anterior, não é gasto
+    const final = String(cardRaw).replace(/\D/g, '').slice(-4);
+    if (!final) continue;
+    const dd = String(data.getUTCDate()).padStart(2, '0'), mm = String(data.getUTCMonth() + 1).padStart(2, '0');
+    let parcela = null;
+    const pm = /parcela\s+(\d+)\s+de\s+(\d+)/i.exec(parc || '');
+    if (pm) parcela = pm[1].padStart(2, '0') + '/' + pm[2].padStart(2, '0');
+    if (!cartoes[final]) cartoes[final] = { nome: 'final ' + final, final, transacoes: [] };
+    cartoes[final].transacoes.push({ data: dd + '/' + mm, estabelecimento: desc, valor, parcela, catItau: null, cidade: null, secao: 'excel' });
+  }
+  let venc = null;
+  if (vencDate) venc = String(vencDate.getUTCDate()).padStart(2, '0') + '/' + String(vencDate.getUTCMonth() + 1).padStart(2, '0') + '/' + vencDate.getUTCFullYear();
+  return { cartoes, venc, postagem: null, subtotaisDeclarados: {}, totalDeclarado, aberta };
+}
+
+// ============================================================================
 // PARSER CSV (Nubank)
 // ============================================================================
 function parseNubankCSV(text, fileName) {
@@ -1126,14 +1729,19 @@ dropzone.onclick = () => fileInput.click();
 dropzone.ondragover = e => { e.preventDefault(); dropzone.classList.add('drag'); };
 dropzone.ondragleave = () => dropzone.classList.remove('drag');
 dropzone.ondrop = e => { e.preventDefault(); dropzone.classList.remove('drag'); if (e.dataTransfer.files.length) processarArquivos(e.dataTransfer.files); };
-fileInput.onchange = e => { if (e.target.files.length) processarArquivos(e.target.files); };
+fileInput.onchange = e => {
+  const files = Array.from(e.target.files);
+  fileInput.value = ''; // permite re-selecionar o mesmo arquivo após cancelar
+  if (files.length) processarArquivos(files);
+};
 
 async function processarArquivos(files) {
   const status = document.getElementById('uploadStatus');
   for (const file of files) {
     const isPdf = /\.pdf$/i.test(file.name);
     const isCsv = /\.csv$/i.test(file.name);
-    if (!isPdf && !isCsv) { status.innerHTML = `<div class="alert error">Formato não suportado: ${file.name}. Use PDF ou CSV.</div>`; continue; }
+    const isXlsx = /\.xlsx$/i.test(file.name);
+    if (!isPdf && !isCsv && !isXlsx) { status.innerHTML = `<div class="alert error">Formato não suportado: ${file.name}. Use PDF, Excel ou CSV.</div>`; continue; }
 
     status.innerHTML = `<div class="alert info"><span class="spinner"></span> Lendo ${file.name}...</div>`;
     try {
@@ -1142,6 +1750,9 @@ async function processarArquivos(files) {
         const paginas = await extrairTextoPdf(file);
         const linhas = paginasParaLinhasPorColuna(paginas);
         result = parseItau(linhas);
+      } else if (isXlsx) {
+        result = await parseItauExcel(file);
+        if (!result || Object.keys(result.cartoes || {}).length === 0) { status.innerHTML = `<div class="alert error">Não consegui ler a planilha ${file.name}. Confira se é a fatura do Itaú exportada em Excel.</div>`; continue; }
       } else {
         const text = await file.text();
         result = parseNubankCSV(text, file.name);
@@ -1154,13 +1765,15 @@ async function processarArquivos(files) {
       const jaExiste = STATE.faturas.find(f => f.arquivo === file.name && f.venc === venc);
       if (jaExiste) {
         if (!confirm(`Fatura ${file.name} (venc ${venc}) já existe. Substituir?`)) continue;
-        STATE.faturas = STATE.faturas.filter(f => f.id !== jaExiste.id);
+        // A antiga só sai do STATE quando a nova for salva (salvarFatura)
       }
 
       FATURA_TEMP = {
         id: 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
         arquivo: file.name, venc, postagem, cartoes, cartoesSelecionados: [],
-        subtotaisDeclarados: subtotaisDeclarados || {}, totalDeclarado
+        subtotaisDeclarados: subtotaisDeclarados || {}, totalDeclarado,
+        aberta: !!result.aberta,
+        substituiId: jaExiste ? jaExiste.id : null
       };
 
       if (result.isNubank) {
@@ -1171,6 +1784,9 @@ async function processarArquivos(files) {
         mostrarSelecaoCartoes();
       }
       status.innerHTML = '';
+      // Aguarda salvar/cancelar esta fatura antes de processar o próximo arquivo
+      // (sem isso, arrastar 2 PDFs juntos descartava um deles em silêncio)
+      await new Promise(res => { resolverFluxoAtual = res; });
     } catch(e) {
       console.error(e);
       status.innerHTML = `<div class="alert error">Erro: ${e.message}</div>`;
@@ -1248,7 +1864,89 @@ function classificarTransacoes() {
     }
   }
   FATURA_TEMP.transacoes = todas;
+  FATURA_TEMP.numConciliados = conciliarPendentes();
+  revSort = { col: null, dir: 1 }; // começa na ordem do PDF
   mostrarRevisao();
+}
+
+// ── Conciliação: casa os gastos que a Michelle anotou no dia (STATE.pendentes)
+//    com as transações da fatura recém-importada, por valor + data + loja + cartão.
+function similaridadeEstab(a, b) {
+  const na = normalizar(a || ''), nb = normalizar(b || '');
+  if (!na || !nb) return 0;
+  if (na === nb) return 3;
+  if (na.includes(nb) || nb.includes(na)) return 2;
+  const dist = levenshtein(na, nb);
+  const maxLen = Math.max(na.length, nb.length);
+  if (maxLen && dist <= maxLen * 0.4) return 1;
+  return 0;
+}
+
+// Diferença em dias entre a data completa do pendente (DD/MM/AAAA) e a data
+// curta da transação da fatura (DD/MM), tratando virada de ano.
+function diasEntreDatas(pDataFull, tDataCurta) {
+  const pp = (pDataFull || '').split('/'); if (pp.length < 3) return null;
+  const pd = +pp[0], pm = +pp[1], pa = +pp[2];
+  const tt = (tDataCurta || '').split('/'); if (tt.length < 2) return null;
+  const td = +tt[0], tm = +tt[1];
+  if (!pd || !pm || !pa || !td || !tm) return null;
+  const dP = new Date(pa, pm - 1, pd);
+  let dT = new Date(pa, tm - 1, td);
+  let diff = Math.round((dT - dP) / 86400000);
+  if (diff > 180) { dT = new Date(pa - 1, tm - 1, td); diff = Math.round((dT - dP) / 86400000); }
+  else if (diff < -180) { dT = new Date(pa + 1, tm - 1, td); diff = Math.round((dT - dP) / 86400000); }
+  return Math.abs(diff);
+}
+
+// Idade em dias de uma data completa DD/MM/AAAA (usa data real, não a heurística curta)
+function idadeEmDias(dataFull) {
+  const pp = (dataFull || '').split('/'); if (pp.length < 3) return 0;
+  const d = new Date(+pp[2], +pp[1] - 1, +pp[0]);
+  if (isNaN(d.getTime())) return 0;
+  const h = new Date();
+  return Math.round((new Date(h.getFullYear(), h.getMonth(), h.getDate()) - d) / 86400000);
+}
+
+function conciliarPendentes() {
+  const trans = FATURA_TEMP.transacoes;
+  const substId = FATURA_TEMP.substituiId;
+  // Elegíveis: pendentes abertos + os que estavam conciliados à fatura sendo substituída
+  // (re-upload do mesmo arquivo) para re-casarem com a nova versão em vez de ficarem órfãos
+  const abertos = (STATE.pendentes || []).filter(p => !p.conciliado || (substId && p.faturaId === substId));
+  const usadas = new Set();
+  let n = 0;
+  for (const p of abertos) {
+    let melhor = null, melhorScore = -1, empate = false;
+    for (let i = 0; i < trans.length; i++) {
+      if (usadas.has(i)) continue;
+      const t = trans[i];
+      // FILTROS RÍGIDOS (evitam casar com uma compra diferente por coincidência):
+      if (p.cartao && t.cartao && p.cartao !== t.cartao) continue;   // mesmo cartão
+      if ((t.valor < 0) !== (p.valor < 0)) continue;                 // não casar estorno com gasto
+      const dv = Math.abs(t.valor - p.valor);
+      if (dv > 0.10) continue;                                       // valor praticamente exato
+      const dd = diasEntreDatas(p.data, t.data);
+      if (dd === null || dd > 3) continue;                           // até ~3 dias de atraso na postagem
+      // desempate: valor exato, similaridade de loja e proximidade de data
+      const score = (dv < 0.01 ? 3 : 2) + similaridadeEstab(p.estabelecimento, t.estabelecimento) + (3 - dd) * 0.3;
+      if (score > melhorScore + 0.01) { melhorScore = score; melhor = i; empate = false; }
+      else if (Math.abs(score - melhorScore) <= 0.01) { empate = true; }
+    }
+    if (melhor === null || empate) continue; // sem candidato ou ambíguo → decide manualmente na revisão
+    usadas.add(melhor);
+    const t = trans[melhor];
+    t.conciliado = true;
+    t.conciliadoPendenteId = p.id;
+    if (p.categoria && p.categoria !== '??') {
+      t.categoria = p.categoria;
+      // origemClass 'conciliado' NÃO entra no aprendizado do dicionário:
+      // como o casamento é por valor/data, a loja pode não corresponder ao texto que
+      // ela digitou — não deixamos isso ensinar o classificador automático.
+      t.origemClass = 'conciliado';
+    }
+    n++;
+  }
+  return n;
 }
 
 function mostrarRevisao() {
@@ -1275,12 +1973,15 @@ function mostrarRevisao() {
     <div class="stat"><div class="label">Total R$</div><div class="value">${fmtBRL(total)}</div></div>`;
 
   let banner = '';
+  if (FATURA_TEMP.numConciliados > 0) {
+    banner += `<div class="alert success" style="margin-bottom:14px"><b>✓ ${FATURA_TEMP.numConciliados} gasto(s) que você anotou</b> ${FATURA_TEMP.numConciliados>1?'foram encontrados':'foi encontrado'} nesta fatura e ${FATURA_TEMP.numConciliados>1?'já vieram conferidos':'já veio conferido'} e classificado${FATURA_TEMP.numConciliados>1?'s':''} (linhas verdes).</div>`;
+  }
   if (temDeclarado) {
     const absDiff = Math.abs(diff);
     const st = absDiff < 1 ? 'success' : absDiff < 50 ? 'warning' : 'error';
     const msg = absDiff < 1 ? 'Totais conferem com o PDF'
       : `Extraído: ${fmtBRL(total)} · PDF: ${fmtBRL(totalDeclarado)} · Diff: <b>${diff>=0?'+':''}${fmtBRL(diff)}</b>`;
-    banner = `<div class="alert ${st}" style="margin-bottom:14px"><b>${absDiff<1?'✓':'⚠'} Auditoria</b><br>${msg}</div>`;
+    banner += `<div class="alert ${st}" style="margin-bottom:14px"><b>${absDiff<1?'✓':'⚠'} Auditoria</b><br>${msg}</div>`;
   }
 
   const botaoAdd = `<div style="margin-bottom:10px">
@@ -1347,15 +2048,61 @@ function excluirTransacaoTemp(idx) {
   mostrarRevisao();
 }
 
+// Ordenação da tabela de revisão (null = ordem original do PDF)
+let revSort = { col: null, dir: 1 };
+
+function setRevSort(col) {
+  if (revSort.col === col) revSort.dir *= -1;
+  else { revSort.col = col; revSort.dir = 1; }
+  mostrarRevisao();
+}
+
+function revSortIcon(col) {
+  if (revSort.col !== col) return '<span style="opacity:.3;font-size:10px">⇅</span>';
+  return revSort.dir === 1 ? '<span style="font-size:10px">▲</span>' : '<span style="font-size:10px">▼</span>';
+}
+
+// Prioridade de revisão: quanto menor, mais precisa de atenção (aparece primeiro ao ordenar por Origem)
+function statusOrdem(t) {
+  if (t.conciliado) return 5;
+  const r = { novo: 0, revisar: 1, itau: 1, fuzzy: 2, auto: 3, manual: 4 };
+  return r[t.origemClass] != null ? r[t.origemClass] : 0;
+}
+
 function renderTransacoesEditavel(trans) {
   const cats = STATE.categorias.slice().sort();
+
+  // Ordena mantendo o índice ORIGINAL de cada transação (para editar/excluir a certa)
+  let ordem = trans.map((t, idx) => ({ t, idx }));
+  if (revSort.col) {
+    const chave = (t) => {
+      switch (revSort.col) {
+        case 'data': { const p = (t.data||'').split('/'); return (parseInt(p[1])||0)*100 + (parseInt(p[0])||0); }
+        case 'cartao': return t.cartao || '';
+        case 'estabelecimento': return (t.estabelecimento||'').toUpperCase();
+        case 'catItau': return t.catItau || '';
+        case 'categoria': return (t.categoria||'').toUpperCase();
+        case 'valor': return t.valor;
+        case 'origem': return statusOrdem(t);
+        default: return 0;
+      }
+    };
+    ordem.sort((a, b) => {
+      const va = chave(a.t), vb = chave(b.t);
+      const c = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+      return c * revSort.dir;
+    });
+  }
+
+  const th = (col, label, cls='') => `<th class="${cls}" style="cursor:pointer;user-select:none" onclick="setRevSort('${col}')">${label} ${revSortIcon(col)}</th>`;
   let html = `<table><thead><tr>
-    <th>Data</th><th>Cartão</th><th>Estabelecimento</th><th>Cat. Itaú</th>
-    <th>Categoria</th><th class="num">Valor</th><th class="center">Origem</th><th class="center">Ações</th>
+    ${th('data','Data')}${th('cartao','Cartão')}${th('estabelecimento','Estabelecimento')}${th('catItau','Cat. Itaú')}
+    ${th('categoria','Categoria')}${th('valor','Valor','num')}${th('origem','Origem','center')}<th class="center">Ações</th>
   </tr></thead><tbody>`;
-  trans.forEach((t, idx) => {
+  for (const { t, idx } of ordem) {
     let bg = '', badge = '';
-    if (t.origemClass === 'auto') badge = '<span class="badge green">auto</span>';
+    if (t.conciliado) { badge = '<span class="badge green">✓ registrado</span>'; bg = 'background:var(--green-soft)'; }
+    else if (t.origemClass === 'auto') badge = '<span class="badge green">auto</span>';
     else if (t.origemClass === 'fuzzy') { badge = '<span class="badge green">fuzzy</span>'; bg = 'background:var(--green-soft)'; }
     else if (t.origemClass === 'revisar') { badge = '<span class="badge amber">amb.</span>'; bg = 'background:var(--amber-soft)'; }
     else if (t.origemClass === 'itau') { badge = '<span class="badge amber">itaú</span>'; bg = 'background:var(--amber-soft)'; }
@@ -1376,7 +2123,7 @@ function renderTransacoesEditavel(trans) {
       <td class="center">${badge}</td>
       <td class="center"><button class="icon-btn" onclick="excluirTransacaoTemp(${idx})" title="Excluir">🗑️</button></td>
     </tr>`;
-  });
+  }
   return html + '</tbody></table>';
 }
 
@@ -1394,6 +2141,7 @@ function salvarFatura() {
     if (['manual','novo','itau','revisar','fuzzy'].includes(t.origemClass)) {
       const k = t.chaveDicio;
       if (!STATE.dicionario[k]) {
+        lixeiraRemove('dicionario', k);
         STATE.dicionario[k] = { cat: t.categoria, n: 1, alt: [] };
       } else {
         if (STATE.dicionario[k].cat === t.categoria) STATE.dicionario[k].n++;
@@ -1407,6 +2155,28 @@ function salvarFatura() {
     }
   }
 
+  // Substituição (reabrir/re-upload): a antiga só sai agora, no salvamento
+  if (FATURA_TEMP.substituiId) {
+    if (FATURA_TEMP.substituiId !== FATURA_TEMP.id) lixeiraAdd('faturas', FATURA_TEMP.substituiId);
+    STATE.faturas = STATE.faturas.filter(f => f.id !== FATURA_TEMP.substituiId);
+  }
+
+  // Baixa os gastos anotados que casaram com esta fatura (só os que sobreviveram
+  // na revisão — se ela apagou a linha conciliada, o pendente continua aberto)
+  const idsConciliados = new Set(
+    FATURA_TEMP.transacoes.filter(t => t.conciliadoPendenteId).map(t => t.conciliadoPendenteId)
+  );
+  for (const p of (STATE.pendentes || [])) {
+    if (idsConciliados.has(p.id)) {
+      // gasto anotado casou com esta fatura → baixa
+      p.conciliado = true; p.faturaId = FATURA_TEMP.id; p.updatedAt = Date.now();
+    } else if (p.faturaId === FATURA_TEMP.id || (FATURA_TEMP.substituiId && p.faturaId === FATURA_TEMP.substituiId)) {
+      // esta fatura (ou a versão substituída) tinha baixado o pendente, mas a linha
+      // não sobreviveu → reabre para não perder o gasto
+      p.conciliado = false; p.faturaId = null; p.updatedAt = Date.now();
+    }
+  }
+
   STATE.faturas.push({
     id: FATURA_TEMP.id, arquivo: FATURA_TEMP.arquivo,
     venc: FATURA_TEMP.venc, postagem: FATURA_TEMP.postagem,
@@ -1414,7 +2184,8 @@ function salvarFatura() {
     transacoes: FATURA_TEMP.transacoes,
     subtotaisDeclarados: FATURA_TEMP.subtotaisDeclarados,
     totalDeclarado: FATURA_TEMP.totalDeclarado,
-    dataAdd: new Date().toISOString()
+    dataAdd: new Date().toISOString(),
+    updatedAt: Date.now()
   });
   salvarState();
   fecharModal('modalClassificar');
@@ -1422,6 +2193,7 @@ function salvarFatura() {
   FATURA_TEMP = null;
   document.getElementById('uploadStatus').innerHTML = `<div class="alert success">✓ Fatura salva! ${fmtBRL(tot)}</div>`;
   renderFaturasList();
+  finalizarFluxoFatura();
 }
 
 function renderFaturasList() {
@@ -1498,22 +2270,32 @@ function reabrirFatura(id) {
   if (!f) return;
   const cartoesObj = {};
   for (const c of f.cartoesSelecionados) cartoesObj[c] = { nome: 'final ' + c, final: c, transacoes: [] };
+  // A fatura original fica intacta no STATE até o salvamento —
+  // cancelar a revisão não perde nada
   FATURA_TEMP = {
     id: f.id, arquivo: f.arquivo, venc: f.venc, postagem: f.postagem,
     cartoes: cartoesObj, cartoesSelecionados: f.cartoesSelecionados,
-    transacoes: f.transacoes.slice(),
+    transacoes: f.transacoes.map(t => ({...t})), // cópia profunda: editar na revisão não pode vazar pro original
     subtotaisDeclarados: f.subtotaisDeclarados || {},
-    totalDeclarado: f.totalDeclarado || null, reabrindo: true
+    totalDeclarado: f.totalDeclarado || null, reabrindo: true, substituiId: f.id
   };
-  STATE.faturas = STATE.faturas.filter(x => x.id !== id);
+  revSort = { col: null, dir: 1 };
   mostrarRevisao();
 }
 
 function excluirFatura(id) {
   const f = STATE.faturas.find(x => x.id === id);
   if (!confirm(`Excluir fatura "${f.arquivo}" (venc ${f.venc})?`)) return;
+  // Reabre os gastos anotados que esta fatura tinha conciliado, senão o gasto
+  // sumiria de tudo (some da fatura E ficaria oculto no card como "conciliado")
+  const idsConc = new Set((f.transacoes || []).filter(t => t.conciliadoPendenteId).map(t => t.conciliadoPendenteId));
+  for (const p of (STATE.pendentes || [])) {
+    if (p.faturaId === id || idsConc.has(p.id)) { p.conciliado = false; p.faturaId = null; p.updatedAt = Date.now(); }
+  }
+  lixeiraAdd('faturas', id);
   STATE.faturas = STATE.faturas.filter(x => x.id !== id);
   salvarState(); renderFaturasList();
+  if (typeof renderInicio === 'function') renderInicio();
 }
 
 // ============================================================================
@@ -1521,7 +2303,9 @@ function excluirFatura(id) {
 // ============================================================================
 function todasTransacoes() {
   const todas = [];
-  for (const f of STATE.faturas) for (const t of f.transacoes) todas.push({...t, venc: f.venc, faturaArquivo: f.arquivo, faturaId: f.id});
+  for (const f of STATE.faturas)
+    for (let i = 0; i < f.transacoes.length; i++)
+      todas.push({...f.transacoes[i], venc: f.venc, faturaArquivo: f.arquivo, faturaId: f.id, tidx: i});
   return todas;
 }
 
@@ -1555,19 +2339,25 @@ function renderHistorico() {
     renderBudget();
   }
 
+  try { renderDestaques(); } catch(e) { console.warn('Destaques erro:', e); }
+  try { renderParcelasFuturas(); } catch(e) { console.warn('Parcelas erro:', e); }
+  try { renderAssinaturas(); } catch(e) { console.warn('Assinaturas erro:', e); }
   try { renderCharts(transComComp, comps, cats); } catch(e) { console.warn('Charts não carregou:', e); }
   try { renderComparativo(transComComp, comps, cats); } catch(e) { console.warn('Comparativo erro:', e); }
   try { renderPivot(transComComp, comps, cats); } catch(e) { console.warn('Pivot erro:', e); }
 
-  // Filtros (usa competência)
+  // Filtros
+  const fVenc = document.getElementById('filterVenc');
   const fMes = document.getElementById('filterMes');
   const fCat = document.getElementById('filterCat');
   const fCart = document.getElementById('filterCartao');
+  const vencs = [...new Set(trans.map(t=>t.venc).filter(Boolean))].sort((a,b)=>a.split('/').reverse().join('').localeCompare(b.split('/').reverse().join('')));
+  fVenc.innerHTML = '<option value="">Todos</option>' + vencs.map(v => `<option value="${v}">${v}</option>`).join('');
   fMes.innerHTML = '<option value="">Todos</option>' + comps.map(c => `<option value="${c}">${c}</option>`).join('');
   fCat.innerHTML = '<option value="">Todas</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
   const cartoes = [...new Set(trans.map(t=>t.cartao))];
   fCart.innerHTML = '<option value="">Todos</option>' + cartoes.map(c => `<option value="${c}">final ${c}</option>`).join('');
-  fMes.onchange = fCat.onchange = fCart.onchange = renderLancamentos;
+  fVenc.onchange = fMes.onchange = fCat.onchange = fCart.onchange = renderLancamentos;
   document.getElementById('filterText').oninput = renderLancamentos;
 
   // Bulk cat select
@@ -1575,6 +2365,324 @@ function renderHistorico() {
 
   bulkSelected = new Set();
   renderLancamentos();
+}
+
+// ============================================================================
+// PARCELAS FUTURAS (projeção)
+// ============================================================================
+// Soma k meses a uma competência "MesNome/AAAA"
+function compAddMeses(comp, k) {
+  const parts = (comp || '').split('/');
+  const mesIdx = MESES_NOME.indexOf(parts[0]);
+  if (mesIdx < 0) return comp;
+  let ano = parseInt(parts[1]);
+  const total = mesIdx + k;
+  ano += Math.floor(total / 12);
+  const m = ((total % 12) + 12) % 12;
+  return MESES_NOME[m] + '/' + ano;
+}
+
+// Projeta as parcelas que ainda vão aparecer nas próximas faturas.
+// Deduplica por compra (loja+valor+total de parcelas), mantendo a ocorrência mais
+// recente (a parcela 04/10 substitui a projeção feita a partir da 03/10), e pula
+// competências que já têm fatura importada (para não contar duas vezes).
+function projetarParcelas() {
+  const trans = todasTransacoes().map(t => ({...t, competencia: vencParaCompetencia(t.venc)}));
+  // Competência mais recente já importada — só projetamos o que vem DEPOIS dela
+  let maxKey = '';
+  for (const t of trans) { if (t.competencia) { const k = compKey(t.competencia); if (k > maxKey) maxKey = k; } }
+  const compras = new Map();
+  for (const t of trans) {
+    if (!t.parcela || !t.competencia) continue;
+    const m = /^(\d{1,2})\/(\d{1,2})$/.exec(t.parcela);
+    if (!m) continue;
+    const nn = +m[1], mm = +m[2];
+    if (!mm || mm <= 1 || nn < 1 || nn >= mm) continue; // parcela válida e ainda a vencer
+    // Chave inclui o mês de início: distingue duas compras iguais na mesma loja
+    // começadas em meses diferentes (senão uma sumiria no dedup)
+    const inicio = compAddMeses(t.competencia, -(nn - 1));
+    const chave = normalizar(t.estabelecimento) + '|' + t.valor.toFixed(2) + '|' + mm + '|' + inicio;
+    const k = compKey(t.competencia);
+    const atual = compras.get(chave);
+    if (!atual || k > atual.key) compras.set(chave, { t, nn, mm, key: k, comp: t.competencia });
+  }
+  const porComp = {};
+  for (const { t, nn, mm, comp } of compras.values()) {
+    for (let k = nn + 1; k <= mm; k++) {
+      const compFut = compAddMeses(comp, k - nn);
+      if (compKey(compFut) <= maxKey) continue; // já chegou/está nas faturas → não é futura
+      if (!porComp[compFut]) porComp[compFut] = { total: 0, itens: [] };
+      porComp[compFut].total += t.valor;
+      porComp[compFut].itens.push({ estabelecimento: t.estabelecimento, valor: t.valor, parcela: k + '/' + mm, cartao: t.cartao });
+    }
+  }
+  return porComp;
+}
+
+function renderParcelasFuturas() {
+  const sec = document.getElementById('parcelasSection');
+  const porComp = projetarParcelas();
+  const comps = Object.keys(porComp).sort((a, b) => compKey(a).localeCompare(compKey(b)));
+  if (!comps.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const grandTotal = comps.reduce((s, c) => s + porComp[c].total, 0);
+  let html = `<div class="stat" style="display:inline-block;margin-bottom:14px"><div class="label">Total comprometido</div><div class="value" style="color:var(--accent)">${fmtBRL(grandTotal)}</div></div>`;
+  for (const c of comps) {
+    const g = porComp[c];
+    g.itens.sort((a, b) => b.valor - a.valor);
+    html += `<details style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg-soft)">
+      <summary style="padding:10px 14px;cursor:pointer;font-weight:600">${c} — ${fmtBRL(g.total)} <span class="small" style="font-weight:400;color:var(--text-soft)">(${g.itens.length} parcela${g.itens.length>1?'s':''})</span></summary>
+      <div style="padding:0 14px 10px">
+        ${g.itens.map(it => `<div class="extra-item"><div class="desc">${it.estabelecimento} <span class="small">(${it.parcela}${it.cartao ? ' · ' + (it.cartao==='NUBANK'?'Nubank':'final '+it.cartao) : ''})</span></div><div class="val">${fmtBRL(it.valor)}</div></div>`).join('')}
+      </div>
+    </details>`;
+  }
+  document.getElementById('parcelasFuturas').innerHTML = html;
+}
+
+// ============================================================================
+// DESTAQUES DO MÊS (insights automáticos)
+// ============================================================================
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function gerarDestaques(comp) {
+  const all = todasTransacoes()
+    .map(t => ({...t, competencia: vencParaCompetencia(t.venc)}))
+    .filter(t => t.competencia);
+  if (!all.length) return null;
+
+  const compsSorted = [...new Set(all.map(t => t.competencia))].sort((a, b) => compKey(a).localeCompare(compKey(b)));
+
+  // Cartões por competência → detecta mês incompleto (fatura de algum cartão ainda
+  // não importada), o que tornaria a comparação de total enganosa
+  const cardsPerComp = {};
+  for (const t of all) (cardsPerComp[t.competencia] = cardsPerComp[t.competencia] || new Set()).add(t.cartao);
+  const nCards = c => (cardsPerComp[c] ? cardsPerComp[c].size : 0);
+  let fullCards = 0; for (const c of compsSorted) fullCards = Math.max(fullCards, nCards(c));
+  const completa = c => nCards(c) >= fullCards;
+
+  // competência a destacar = a mais recente COMPLETA (a menos que passada explícita)
+  if (!comp) {
+    for (let i = compsSorted.length - 1; i >= 0; i--) { if (completa(compsSorted[i])) { comp = compsSorted[i]; break; } }
+    if (!comp) comp = compsSorted[compsSorted.length - 1];
+  }
+  const idx = compsSorted.indexOf(comp);
+  if (idx < 0) return null;
+  // até 3 competências anteriores COMPLETAS (comparação justa)
+  const anteriores = compsSorted.slice(0, idx).filter(completa).slice(-3);
+
+  // pivot/total LÍQUIDOS (incluem estornos negativos) para totais e categorias
+  const pivot = {}, totalPorComp = {};
+  for (const t of all) {
+    const c = t.competencia, cat = t.categoria || '??';
+    (pivot[c] = pivot[c] || {})[cat] = (pivot[c][cat] || 0) + t.valor;
+    totalPorComp[c] = (totalPorComp[c] || 0) + t.valor;
+  }
+  const totalComp = totalPorComp[comp] || 0;
+  const destaques = [];
+
+  // (1) total da competência vs média das anteriores completas
+  if (anteriores.length) {
+    const media = anteriores.reduce((s, c) => s + (totalPorComp[c] || 0), 0) / anteriores.length;
+    if (media > 0) {
+      const pct = Math.round((totalComp - media) / media * 100);
+      if (Math.abs(pct) >= 5)
+        destaques.push({ icone: pct > 0 ? '📈' : '📉', texto: `${comp} fechou <b>${Math.abs(pct)}% ${pct > 0 ? 'acima' : 'abaixo'}</b> da média: ${fmtBRL(totalComp)} <span class="small">(média ${fmtBRL(media)})</span>` });
+      else
+        destaques.push({ icone: '➡️', texto: `${comp} fechou em linha com a média: ${fmtBRL(totalComp)}` });
+    }
+    // (2) top 3 categorias com maior aumento em R$ vs média das anteriores
+    const aumentos = [];
+    for (const cat of Object.keys(pivot[comp] || {})) {
+      const mediaCat = anteriores.reduce((s, c) => s + ((pivot[c] && pivot[c][cat]) || 0), 0) / anteriores.length;
+      const delta = (pivot[comp][cat] || 0) - mediaCat;
+      if (delta >= 100) aumentos.push({ cat, delta, atual: pivot[comp][cat], media: mediaCat });
+    }
+    aumentos.sort((a, b) => b.delta - a.delta);
+    for (const a of aumentos.slice(0, 3))
+      destaques.push({ icone: '🔺', texto: `<b>${escHtml(a.cat)}</b> subiu ${fmtBRL(a.delta)} vs média <span class="small">(${fmtBRL(a.media)} → ${fmtBRL(a.atual)})</span>` });
+  } else {
+    destaques.push({ icone: 'ℹ️', texto: `${comp}: ${fmtBRL(totalComp)} <span class="small">(sem meses anteriores completos para comparar)</span>` });
+  }
+
+  // Atípicos e lojas novas: usam só valores positivos e histórico ANTES de comp
+  const pos = all.filter(t => t.valor > 0);
+  const ckComp = compKey(comp);
+
+  // (3) gastos atípicos: exige loja com >=3 ocorrências anteriores (evita falso positivo)
+  const histLoja = {};
+  for (const t of pos) {
+    if (compKey(t.competencia) >= ckComp) continue;
+    const k = normalizar(t.estabelecimento);
+    (histLoja[k] = histLoja[k] || []).push(t.valor);
+  }
+  const atipicos = [];
+  for (const t of pos) {
+    if (t.competencia !== comp || t.valor < 50) continue;
+    const hist = histLoja[normalizar(t.estabelecimento)];
+    if (hist && hist.length >= 3) {
+      const maxHist = Math.max(...hist);
+      if (t.valor > maxHist * 2) atipicos.push({ estab: t.estabelecimento, valor: t.valor, maxHist });
+    }
+  }
+  atipicos.sort((a, b) => b.valor - a.valor);
+  for (const a of atipicos.slice(0, 3))
+    destaques.push({ icone: '⚠️', texto: `Gasto atípico: <b>${escHtml(a.estab)}</b> ${fmtBRL(a.valor)} <span class="small">(maior antes: ${fmtBRL(a.maxHist)})</span>` });
+
+  // (4) estabelecimentos novos com gasto relevante
+  const vistosAntes = new Set(pos.filter(t => compKey(t.competencia) < ckComp).map(t => normalizar(t.estabelecimento)));
+  const novos = {};
+  for (const t of pos) {
+    if (t.competencia !== comp) continue;
+    const k = normalizar(t.estabelecimento);
+    if (vistosAntes.has(k)) continue;
+    (novos[k] = novos[k] || { estab: t.estabelecimento, total: 0 }).total += t.valor;
+  }
+  const novosRelevantes = Object.values(novos).filter(n => n.total >= 100).sort((a, b) => b.total - a.total);
+  for (const n of novosRelevantes.slice(0, 3))
+    destaques.push({ icone: '🆕', texto: `Novo: <b>${escHtml(n.estab)}</b> — ${fmtBRL(n.total)}` });
+
+  return { comp, totalComp, destaques };
+}
+
+function renderDestaques() {
+  const sec = document.getElementById('destaquesSection');
+  const d = gerarDestaques();
+  if (!d || !d.destaques.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  document.getElementById('destaquesTitulo').textContent = `Destaques de ${d.comp}`;
+  document.getElementById('destaquesList').innerHTML = d.destaques
+    .map(x => `<div class="inicio-status-linha"><span class="icone">${x.icone}</span><span>${x.texto}</span></div>`)
+    .join('');
+}
+
+// ============================================================================
+// ASSINATURAS / RECORRÊNCIAS
+// ============================================================================
+function mediana(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// Detecta cobranças recorrentes: mesma loja (normalizada), em >=3 competências,
+// com >=2 meses consecutivos e valor estável (maioria perto da mediana).
+// Devolve cada assinatura com valor atual, categoria e alertas.
+function detectarAssinaturas() {
+  const trans = todasTransacoes()
+    .map(t => ({...t, competencia: vencParaCompetencia(t.venc)}))
+    .filter(t => t.competencia && t.valor > 0);
+
+  // Competência mais recente POR CARTÃO (a fatura mais nova já importada de cada um).
+  // Usada para o alerta de "cancelada" — evita falso alarme quando a fatura mais
+  // recente de OUTRO cartão ainda não foi importada.
+  const cardMaxCk = new Map(), cardMaxComp = new Map();
+  for (const t of trans) {
+    const k = compKey(t.competencia);
+    if (!cardMaxCk.has(t.cartao) || k > cardMaxCk.get(t.cartao)) { cardMaxCk.set(t.cartao, k); cardMaxComp.set(t.cartao, t.competencia); }
+  }
+
+  const grupos = new Map();
+  for (const t of trans) {
+    const key = normalizar(t.estabelecimento);
+    if (!key) continue;
+    if (!grupos.has(key)) grupos.set(key, []);
+    grupos.get(key).push({ comp: t.competencia, ck: compKey(t.competencia), valor: t.valor, estab: t.estabelecimento, categoria: t.categoria, cartao: t.cartao });
+  }
+
+  const assinaturas = [];
+  for (const [key, arr] of grupos) {
+    const porComp = new Map();
+    for (const c of arr) { if (!porComp.has(c.ck)) porComp.set(c.ck, []); porComp.get(c.ck).push(c); }
+    const cks = [...porComp.keys()].sort();
+    if (cks.length < 3) continue;
+
+    // >=2 meses consecutivos (cadência mensal, não repetição aleatória)
+    const mesesNum = cks.map(ck => parseInt(ck.slice(0,4)) * 12 + parseInt(ck.slice(4,6)) - 1);
+    let temConsec = false;
+    for (let i = 1; i < mesesNum.length; i++) if (mesesNum[i] - mesesNum[i-1] === 1) { temConsec = true; break; }
+    if (!temConsec) continue;
+
+    // valor estável: maioria dos lançamentos perto da mediana (exclui supermercado etc.)
+    const valores = arr.map(c => c.valor);
+    const med = mediana(valores);
+    if (med <= 0) continue;
+    const dentro = valores.filter(v => Math.abs(v - med) <= med * 0.20).length;
+    if (dentro / valores.length < 0.6) continue;
+
+    const compsSet = new Set(cks);
+    const latestCk = cks[cks.length - 1];
+    const latestCharges = porComp.get(latestCk);
+    // valor representativo do mês mais recente = o mais próximo da mediana (estável,
+    // independente da ordem de importação e de cobranças duplicadas)
+    const valorAtual = latestCharges.map(c => c.valor).sort((a,b) => Math.abs(a-med) - Math.abs(b-med))[0];
+    const compAtual = latestCharges[0].comp;
+    const cartaoAtual = latestCharges[0].cartao;
+
+    const catCount = {};
+    for (const c of arr) { const cc = c.categoria || '??'; catCount[cc] = (catCount[cc]||0) + 1; }
+    const categoria = Object.entries(catCount).sort((a,b) => b[1]-a[1])[0][0];
+
+    // referência de recência do cartão em que a assinatura é cobrada
+    const refCk = cardMaxCk.get(cartaoAtual) || latestCk;
+    const refComp = cardMaxComp.get(cartaoAtual) || compAtual;
+    const ativa = compsSet.has(refCk);
+
+    const alertas = [];
+    // (a) aumento vs mediana das competências ANTERIORES à mais recente
+    const anteriores = arr.filter(c => c.ck < latestCk).map(c => c.valor);
+    const medAnt = anteriores.length ? mediana(anteriores) : med;
+    if (valorAtual > medAnt * 1.10 && (valorAtual - medAnt) >= 1) {
+      alertas.push(`subiu de ${fmtBRL(medAnt)} para ${fmtBRL(valorAtual)}`);
+    }
+    // (b) cobrança repetida: mês mais recente com mais cobranças que o normal
+    const counts = cks.map(ck => porComp.get(ck).length);
+    const medCount = mediana(counts);
+    if (latestCharges.length >= 2 && latestCharges.length > medCount) {
+      alertas.push(`cobrado ${latestCharges.length}× em ${compAtual} (normalmente 1×)`);
+    }
+    // (c) sumiu: o cartão já tem fatura mais nova que a última cobrança, e a assinatura
+    // estava presente no mês anterior a essa fatura mais nova
+    if (!ativa) {
+      const antKey = compKey(compAddMeses(refComp, -1));
+      if (compsSet.has(antKey)) alertas.push(`não veio em ${refComp} — conferir se foi cancelada`);
+    }
+
+    assinaturas.push({ nome: key, categoria, valorAtual, med, comps: cks.length, ativa, alertas });
+  }
+  assinaturas.sort((a, b) => b.valorAtual - a.valorAtual);
+  return { assinaturas };
+}
+
+function renderAssinaturas() {
+  const sec = document.getElementById('assinaturasSection');
+  const { assinaturas } = detectarAssinaturas();
+  if (!assinaturas.length) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const totalMensal = assinaturas.filter(a => a.ativa).reduce((s, a) => s + a.valorAtual, 0);
+  const comAlerta = assinaturas.filter(a => a.alertas.length);
+
+  let html = `<div class="stat" style="display:inline-block;margin-bottom:14px"><div class="label">Ativas · estimado por mês</div><div class="value" style="color:var(--accent)">${fmtBRL(totalMensal)}</div></div>`;
+  if (comAlerta.length) {
+    html += `<div class="alert warning" style="margin-bottom:14px"><b>⚠ ${comAlerta.length} assinatura(s) para conferir:</b><br>` +
+      comAlerta.map(a => `• <b>${a.nome}</b> — ${a.alertas.join('; ')}`).join('<br>') + `</div>`;
+  }
+  html += `<table><thead><tr><th>Assinatura</th><th>Categoria</th><th class="num">Valor atual</th><th class="center">Meses</th></tr></thead><tbody>`;
+  for (const a of assinaturas) {
+    const badge = a.alertas.length ? ` <span class="badge amber" style="font-size:9px" title="${a.alertas.join('; ')}">⚠</span>` : '';
+    const inativa = a.ativa ? '' : ` <span class="badge gray" style="font-size:9px">sumiu</span>`;
+    html += `<tr style="${a.ativa ? '' : 'opacity:.55'}">
+      <td><b>${a.nome}</b>${badge}${inativa}</td>
+      <td><span class="badge gray">${a.categoria}</span></td>
+      <td class="num">${fmtBRL(a.valorAtual)}</td>
+      <td class="center"><small>${a.comps}</small></td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  document.getElementById('assinaturasList').innerHTML = html;
 }
 
 // ============================================================================
@@ -1772,53 +2880,86 @@ function renderPivot(transComp, comps, cats) {
 // ============================================================================
 // LANÇAMENTOS (com bulk e inline edit)
 // ============================================================================
+function setSortCol(col) {
+  if (sortCol === col) sortDir *= -1;
+  else { sortCol = col; sortDir = col === 'valor' ? -1 : 1; }
+  renderLancamentos();
+}
+
+function sortIcon(col) {
+  if (sortCol !== col) return '<span style="opacity:.3;font-size:10px">⇅</span>';
+  return sortDir === 1 ? '<span style="font-size:10px">▲</span>' : '<span style="font-size:10px">▼</span>';
+}
+
 function renderLancamentos() {
   const trans = todasTransacoes().map(t => ({...t, competencia: vencParaCompetencia(t.venc)}));
+  const fVenc = document.getElementById('filterVenc').value;
   const fMes = document.getElementById('filterMes').value;
   const fCat = document.getElementById('filterCat').value;
   const fCart = document.getElementById('filterCartao').value;
   const fTxt = document.getElementById('filterText').value.toUpperCase();
 
   let filtered = trans;
+  if (fVenc) filtered = filtered.filter(t => t.venc === fVenc);
   if (fMes) filtered = filtered.filter(t => t.competencia === fMes);
   if (fCat) filtered = filtered.filter(t => t.categoria === fCat);
   if (fCart) filtered = filtered.filter(t => t.cartao === fCart);
   if (fTxt) filtered = filtered.filter(t => (t.estabelecimento||'').toUpperCase().includes(fTxt));
 
-  filtered.sort((a,b) => {
-    const ca = compKey(a.competencia), cb = compKey(b.competencia);
-    if (ca !== cb) return cb.localeCompare(ca);
-    return (a.data||'').localeCompare(b.data||'');
+  filtered.sort((a, b) => {
+    let va, vb;
+    if (sortCol === 'venc') { va = (a.venc||'').split('/').reverse().join(''); vb = (b.venc||'').split('/').reverse().join(''); }
+    else if (sortCol === 'competencia') { va = compKey(a.competencia); vb = compKey(b.competencia); }
+    else if (sortCol === 'data') { va = a.data||''; vb = b.data||''; }
+    else if (sortCol === 'cartao') { va = a.cartao||''; vb = b.cartao||''; }
+    else if (sortCol === 'estabelecimento') { va = a.estabelecimento||''; vb = b.estabelecimento||''; }
+    else if (sortCol === 'categoria') { va = a.categoria||''; vb = b.categoria||''; }
+    else if (sortCol === 'valor') { return (a.valor - b.valor) * sortDir; }
+    else if (sortCol === 'obs') { va = a.obs||''; vb = b.obs||''; }
+    else { va = ''; vb = ''; }
+    return va.localeCompare(vb) * sortDir;
   });
 
   const total = filtered.reduce((s,t) => s+t.valor, 0);
   const cats = STATE.categorias.slice().sort();
+  const th = (col, label, cls='') =>
+    `<th class="${cls}" style="cursor:pointer;user-select:none" onclick="setSortCol('${col}')">${label} ${sortIcon(col)}</th>`;
 
   let html = `<table><thead><tr>
     <th class="center"><input type="checkbox" id="bulkAll" onchange="toggleBulkAll(this.checked)"></th>
-    <th>Compet.</th><th>Data</th><th>Cartão</th><th>Estabelecimento</th>
-    <th>Categoria</th><th class="num">Valor</th>
+    ${th('venc','Vencimento')}${th('competencia','Compet.')}${th('data','Data')}${th('cartao','Cartão')}
+    ${th('estabelecimento','Estabelecimento')}${th('categoria','Categoria')}
+    ${th('valor','Valor','num')}${th('obs','Observação')}
   </tr></thead><tbody>`;
+
   for (let i = 0; i < filtered.length; i++) {
     const t = filtered[i];
-    const uid = t.faturaId + '_' + i;
+    const uid = t.faturaId + '_' + t.tidx;
     const checked = bulkSelected.has(uid) ? 'checked' : '';
     const parc = t.parcela ? ` <small style="color:var(--text-dim)">(${t.parcela})</small>` : '';
+    const obs = (t.obs||'').replace(/"/g, '&quot;');
     html += `<tr>
-      <td class="center"><input type="checkbox" data-uid="${uid}" data-fid="${t.faturaId}" data-idx="${i}" ${checked} onchange="toggleBulk(this)"></td>
+      <td class="center"><input type="checkbox" data-uid="${uid}" data-fid="${t.faturaId}" data-tidx="${t.tidx}" ${checked} onchange="toggleBulk(this)"></td>
+      <td><small>${t.venc||'-'}</small></td>
       <td><small>${t.competencia||'-'}</small></td>
       <td>${t.data}</td>
       <td><small>final ${t.cartao}</small></td>
       <td>${t.estabelecimento}${parc}</td>
-      <td><select class="inline-cat" data-fid="${t.faturaId}" data-estab="${encodeURIComponent(t.estabelecimento)}" data-data="${t.data}" data-cartao="${t.cartao}" onchange="inlineEditCat(this)">
+      <td><select class="inline-cat" data-fid="${t.faturaId}" data-tidx="${t.tidx}" onchange="inlineEditCat(this)">
         ${cats.map(c => `<option value="${c}" ${t.categoria===c?'selected':''}>${c}</option>`).join('')}
         ${t.categoria==='??'?'<option value="??" selected>??</option>':''}
       </select></td>
       <td class="num" style="${t.valor<0?'color:var(--red)':''}">${fmtBRL(t.valor)}</td>
+      <td><input type="text" class="inline-obs" value="${obs}" placeholder="—"
+        data-fid="${t.faturaId}" data-tidx="${t.tidx}"
+        style="width:100%;min-width:120px;border:none;background:transparent;font-size:13px;color:var(--text);padding:2px 4px;border-radius:4px"
+        onfocus="this.style.background='var(--bg-soft)';this.style.border='1px solid var(--border)'"
+        onblur="this.style.background='transparent';this.style.border='none';inlineEditObs(this)"
+        onkeydown="if(event.key==='Enter')this.blur()"></td>
     </tr>`;
   }
   html += `</tbody><tfoot><tr style="background:var(--bg-soft);font-weight:600">
-    <td colspan="6">${filtered.length} lançamentos</td>
+    <td colspan="8">${filtered.length} lançamentos</td>
     <td class="num">${fmtBRL(total)}</td>
   </tr></tfoot></table>`;
   document.getElementById('lancamentosTable').innerHTML = html;
@@ -1826,15 +2967,17 @@ function renderLancamentos() {
 }
 
 function inlineEditCat(sel) {
-  const fid = sel.dataset.fid;
-  const estab = decodeURIComponent(sel.dataset.estab);
-  const data = sel.dataset.data;
-  const cartao = sel.dataset.cartao;
-  const novaCat = sel.value;
-  const f = STATE.faturas.find(x => x.id === fid);
+  const f = STATE.faturas.find(x => x.id === sel.dataset.fid);
   if (!f) return;
-  const t = f.transacoes.find(t => t.estabelecimento === estab && t.data === data && t.cartao === cartao);
-  if (t) { t.categoria = novaCat; t.origemClass = 'manual'; salvarState(); }
+  const t = f.transacoes[parseInt(sel.dataset.tidx)];
+  if (t) { t.categoria = sel.value; t.origemClass = 'manual'; f.updatedAt = Date.now(); salvarState(); }
+}
+
+function inlineEditObs(el) {
+  const f = STATE.faturas.find(x => x.id === el.dataset.fid);
+  if (!f) return;
+  const t = f.transacoes[parseInt(el.dataset.tidx)];
+  if (t && (t.obs || '') !== el.value.trim()) { t.obs = el.value.trim(); f.updatedAt = Date.now(); salvarState(); }
 }
 
 function toggleBulk(cb) {
@@ -1861,44 +3004,45 @@ function aplicarBulk() {
   const novaCat = document.getElementById('bulkCat').value;
   if (!novaCat) return;
   const cbs = document.querySelectorAll('#lancamentosTable input[type="checkbox"][data-uid]:checked');
-  const agrupado = {};
-  cbs.forEach(cb => {
-    const fid = cb.dataset.fid;
-    if (!agrupado[fid]) agrupado[fid] = [];
-    agrupado[fid].push(parseInt(cb.dataset.idx));
-  });
-  // Apply — we need to match by position in filtered results, which maps to original
-  // Simpler: re-query all transactions and match
-  const trans = todasTransacoes();
-  const fMes = document.getElementById('filterMes').value;
-  const fCat = document.getElementById('filterCat').value;
-  const fCart = document.getElementById('filterCartao').value;
-  const fTxt = document.getElementById('filterText').value.toUpperCase();
-  let filtered = trans;
-  if (fMes) filtered = filtered.filter(t => t.venc === fMes);
-  if (fCat) filtered = filtered.filter(t => t.categoria === fCat);
-  if (fCart) filtered = filtered.filter(t => t.cartao === fCart);
-  if (fTxt) filtered = filtered.filter(t => (t.estabelecimento||'').toUpperCase().includes(fTxt));
-  filtered.sort((a,b) => {
-    const va = a.venc||'', vb = b.venc||'';
-    if (va !== vb) return vb.split('/').reverse().join('').localeCompare(va.split('/').reverse().join(''));
-    return (a.data||'').localeCompare(b.data||'');
-  });
-
   let count = 0;
-  for (const cb of cbs) {
-    const idx = parseInt(cb.dataset.idx);
-    const t = filtered[idx];
-    if (!t) continue;
-    const f = STATE.faturas.find(x => x.id === t.faturaId);
-    if (!f) continue;
-    const orig = f.transacoes.find(o => o.estabelecimento === t.estabelecimento && o.data === t.data && o.cartao === t.cartao);
-    if (orig) { orig.categoria = novaCat; orig.origemClass = 'manual'; count++; }
-  }
+  cbs.forEach(cb => {
+    const f = STATE.faturas.find(x => x.id === cb.dataset.fid);
+    if (!f) return;
+    const t = f.transacoes[parseInt(cb.dataset.tidx)];
+    if (t) { t.categoria = novaCat; t.origemClass = 'manual'; f.updatedAt = Date.now(); count++; }
+  });
   salvarState();
   bulkSelected = new Set();
   renderLancamentos();
   alert(`${count} lançamentos reclassificados para "${novaCat}".`);
+}
+
+async function gerarLinkCompartilhar() {
+  if (!SESSAO) { alert('Você precisa estar logado para gerar o link.'); return; }
+  try {
+    const resp = await fetch(SCRIPT_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ tipo: 'getShareToken', sessao: SESSAO })
+    });
+    const r = await resp.json();
+    if (!r.ok || !r.token) {
+      if (r.erro && r.erro.includes('desconhecido')) {
+        alert('O Apps Script precisa ser atualizado para gerar o link seguro (veja as instruções que o Claude te passou).');
+      } else {
+        alert(r.erro || 'Erro ao gerar o link.');
+      }
+      return;
+    }
+    const url = location.origin + '/compartilhar?t=' + encodeURIComponent(r.token);
+    navigator.clipboard.writeText(url).then(() => {
+      alert('Link copiado!\n\nEste link é permanente e SOMENTE-LEITURA — o Rogério vê os lançamentos mas não consegue alterar nada. Envie uma única vez; ele pode salvar nos favoritos.');
+    }).catch(() => {
+      prompt('Copie o link abaixo:', url);
+    });
+  } catch(e) {
+    alert('Erro de conexão: ' + e.message);
+  }
 }
 
 function limparBulk() {
@@ -1995,6 +3139,7 @@ function alterarRegra(chave, novaCat) {
 
 function excluirRegra(chave) {
   if (!confirm(`Excluir regra "${chave}"?`)) return;
+  lixeiraAdd('dicionario', chave);
   delete STATE.dicionario[chave]; salvarState(); renderDicionario();
 }
 
@@ -2022,6 +3167,7 @@ function confirmarNovaRegra() {
   if (!estab) { alert('Informe o estabelecimento.'); return; }
   const chave = normalizar(estab);
   if (STATE.dicionario[chave]) { alert(`"${chave}" já existe.`); return; }
+  lixeiraRemove('dicionario', chave);
   const cat = document.getElementById('nrCategoria').value;
   STATE.dicionario[chave] = { cat, n: 1, alt: [] };
   salvarState(); fecharModal('modalNovaRegra'); renderDicionario();
@@ -2074,6 +3220,7 @@ function confirmarMerge() {
       const found = (primary.alt||[]).find(x => x[0] === a[0]);
       if (found) found[1] += a[1]; else { if(!primary.alt) primary.alt=[]; primary.alt.push([...a]); }
     }
+    lixeiraAdd('dicionario', k);
     delete STATE.dicionario[k];
   }
   salvarState(); fecharModal('modalMerge'); renderDicionario();
@@ -2115,11 +3262,13 @@ function confirmarAddCartao() {
   const f = document.getElementById('acFinal').value.trim();
   if (!/^\d{4}$/.test(f)) { alert('Use 4 dígitos.'); return; }
   if (STATE.cartoesMichelle.includes(f)) { alert('Já cadastrado.'); return; }
+  lixeiraRemove('cartoesMichelle', f);
   STATE.cartoesMichelle.push(f); salvarState(); fecharModal('modalAddCartao'); renderConfig();
 }
 
 function removerCartao(final) {
   if (!confirm(`Remover final ${final}?`)) return;
+  lixeiraAdd('cartoesMichelle', final);
   STATE.cartoesMichelle = STATE.cartoesMichelle.filter(c => c !== final);
   salvarState(); renderConfig();
 }
@@ -2130,12 +3279,15 @@ function confirmarNovaCategoria() {
   const nome = document.getElementById('ncNome').value.trim();
   if (!nome) return;
   if (STATE.categorias.includes(nome)) { alert('Já existe.'); return; }
+  lixeiraRemove('categorias', nome);
   STATE.categorias.push(nome); salvarState(); fecharModal('modalNovaCategoria'); renderConfig();
 }
 
 function removerCategoria(c) {
   const emUso = todasTransacoes().filter(t => t.categoria === c).length;
   if (emUso > 0 && !confirm(`"${c}" usada em ${emUso} lançamentos. Remover?`)) return;
+  lixeiraAdd('categorias', c);
+  if (STATE.orcamentos[c] != null) lixeiraAdd('orcamentos', c);
   STATE.categorias = STATE.categorias.filter(x => x !== c);
   delete STATE.orcamentos[c];
   salvarState(); renderConfig();
@@ -2170,16 +3322,19 @@ function addOrcamentoCategoria() {
   if (!val) return;
   const num = parseFloat(val.replace(/\./g,'').replace(',','.'));
   if (isNaN(num) || num < 0) { alert('Valor inválido.'); return; }
+  lixeiraRemove('orcamentos', sel);
   STATE.orcamentos[sel] = num;
   salvarState(); renderConfig();
 }
 
 function setOrcamento(cat, val) {
+  lixeiraRemove('orcamentos', cat);
   STATE.orcamentos[cat] = parseFloat(val) || 0;
   salvarState();
 }
 
 function removeOrcamento(cat) {
+  lixeiraAdd('orcamentos', cat);
   delete STATE.orcamentos[cat];
   salvarState(); renderOrcamentoConfig();
 }
@@ -2199,25 +3354,70 @@ function importarBackup(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const data = JSON.parse(e.target.result);
       if (!data.faturas || !data.dicionario) throw new Error('Arquivo inválido');
-      if (!confirm(`Backup: ${data.faturas.length} faturas, ${Object.keys(data.dicionario).length} regras.\nSubstituir dados atuais?`)) return;
-      STATE = data;
-      if (!STATE.categorias) STATE.categorias = [...CATEGORIAS_DEFAULT];
-      if (!STATE.cartoesMichelle) STATE.cartoesMichelle = [...CARTOES_MICHELLE_DEFAULT];
-      if (!STATE.orcamentos) STATE.orcamentos = {};
-      salvarState(); alert('Backup importado!'); location.reload();
+      if (!confirm(`Backup: ${data.faturas.length} faturas, ${Object.keys(data.dicionario).length} regras.\nSubstituir dados atuais (deste aparelho E da nuvem)?`)) return;
+      if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+      STATE = normalizarEstado(data);
+      STATE.updatedAt = Date.now();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+      localStorage.setItem('cc_sync_pendente', String(STATE.updatedAt));
+      // Envia para a nuvem ANTES de recarregar — senão o reload puxa a nuvem
+      // antiga por cima e o import é descartado em silêncio
+      if (SESSAO) {
+        setSyncStatus('syncing', 'Enviando backup...');
+        const ok = await syncParaNuvem();
+        if (!ok) {
+          alert('O backup foi aplicado neste aparelho, mas NÃO chegou à nuvem (sem conexão ou sessão expirada). Conecte-se e aguarde o aviso "Salvo na nuvem" antes de usar outro aparelho.');
+          return;
+        }
+      }
+      alert('Backup importado!'); location.reload();
     } catch(err) { alert('Erro: ' + err.message); }
   };
   reader.readAsText(file);
 }
 
-function resetarTudo() {
-  if (!confirm('APAGAR TODOS os dados? Essa ação não pode ser desfeita.')) return;
-  if (!confirm('Última confirmação. Tem certeza?')) return;
-  localStorage.removeItem(STORAGE_KEY); location.reload();
+async function resetarTudo() {
+  if (!confirm('APAGAR TODOS os dados, deste aparelho E da nuvem? Essa ação não pode ser desfeita.')) return;
+  if (!confirm('Última confirmação. Um backup será baixado antes de apagar. Tem certeza?')) return;
+  try { exportarBackup(); } catch(e) {}
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+  // Estado zerado com carimbo de agora e lixeira de tudo que existia —
+  // sem isso, o outro aparelho ressuscitava os dados no próximo merge
+  const agora = Date.now();
+  const vazio = stateDefault();
+  vazio.updatedAt = agora;
+  vazio.lixeira = {
+    faturas: (STATE.faturas || []).map(f => ({ id: f.id, ts: agora })),
+    extras: (STATE.extras || []).map(x => ({ id: x.id, ts: agora })),
+    avulsas: (STATE.avulsas || []).map(x => ({ id: x.id, ts: agora })),
+    acertos: (STATE.acertos || []).map(x => ({ id: x.id, ts: agora })),
+    contasFixas: (STATE.contasFixas || []).map(x => ({ id: x.id, ts: agora })),
+    pendentes: (STATE.pendentes || []).map(x => ({ id: x.id, ts: agora }))
+  };
+  if (SESSAO) {
+    try {
+      const resp = await fetch(SCRIPT_URL, {
+        method: 'POST', redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ tipo: 'save', sessao: SESSAO, dados: vazio })
+      });
+      const r = await resp.json();
+      if (!r.ok) {
+        alert('Não foi possível limpar a nuvem (' + (r.erro || 'erro') + '). O reset foi cancelado — nada foi apagado.');
+        return;
+      }
+    } catch(e) {
+      alert('Sem conexão com a nuvem. O reset foi cancelado — nada foi apagado.');
+      return;
+    }
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(vazio));
+  localStorage.removeItem('cc_sync_pendente');
+  location.reload();
 }
 
 // ============================================================================
@@ -2242,7 +3442,7 @@ function renderContasFixas() {
   const sorted = [...STATE.contasFixas].sort((a,b) => a.dia - b.dia);
   let html = '';
   for (const c of sorted) {
-    const periodo = c.dia <= 15 ? '1-15' : '15-30';
+    const periodo = c.dia <= 15 ? '1-15' : '16-31';
     html += `<div class="conta-row">
       <div>${c.descricao} <span class="badge ${periodo==='1-15'?'green':'amber'}" style="font-size:10px">${periodo}</span></div>
       <div class="num" style="font-weight:600">${fmtBRL(c.valor)}</div>
@@ -2258,7 +3458,7 @@ function renderContasFixas() {
   const total2 = sorted.filter(c=>c.dia>15).reduce((s,c)=>s+c.valor,0);
   html += `<div style="display:flex;gap:20px;padding:10px 0;font-size:13px;font-weight:600;border-top:2px solid var(--border);margin-top:4px">
     <span>Período 1-15: ${fmtBRL(total1)}</span>
-    <span>Período 15-30: ${fmtBRL(total2)}</span>
+    <span>Período 16-31: ${fmtBRL(total2)}</span>
     <span style="margin-left:auto">Total mensal: ${fmtBRL(total1+total2)}</span>
   </div>`;
   list.innerHTML = html;
@@ -2295,21 +3495,41 @@ function salvarContaFixa() {
 
   if (editandoContaId) {
     const c = STATE.contasFixas.find(x => x.id === editandoContaId);
-    if (c) { c.descricao = descricao; c.valor = valor; c.dia = dia; }
+    if (c) { c.descricao = descricao; c.valor = valor; c.dia = dia; c.updatedAt = Date.now(); }
   } else {
     STATE.contasFixas.push({
       id: 'cf_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
-      descricao, valor, dia
+      descricao, valor, dia, updatedAt: Date.now()
     });
   }
-  salvarState(); fecharModal('modalContaFixa'); renderAcerto();
+  salvarState(); fecharModal('modalContaFixa');
+  atualizarAcertoPreservandoAjustes();
 }
 
 function excluirContaFixa(id) {
   const c = STATE.contasFixas.find(x => x.id === id);
   if (!confirm(`Excluir "${c.descricao}"?`)) return;
+  lixeiraAdd('contasFixas', id);
   STATE.contasFixas = STATE.contasFixas.filter(x => x.id !== id);
-  salvarState(); renderAcerto();
+  salvarState();
+  atualizarAcertoPreservandoAjustes();
+}
+
+// Re-renderiza o acerto sem perder o que a Michelle já ajustou no formulário
+// (valores reais digitados, checkboxes desmarcados, mês/período escolhidos)
+function atualizarAcertoPreservandoAjustes() {
+  const ajustes = {};
+  document.querySelectorAll('#acertoContasPeriodo input, #acertoExtras input[type="checkbox"]').forEach(el => {
+    if (el.id) ajustes[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  renderContasFixas();
+  renderAcertoPreview(); // não chama renderAcertoMeses — mês/período ficam como estão
+  for (const [id, v] of Object.entries(ajustes)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = v; else el.value = v;
+  }
+  atualizarMensagem();
 }
 
 // — Meses disponíveis —
@@ -2327,44 +3547,44 @@ function renderAcertoMeses() {
   const mesAtual = MESES_NOME[hoje.getMonth()] + '/' + hoje.getFullYear();
   sel.value = mesAtual;
 
-  // Auto-selecionar período baseado no dia
+  // Auto-selecionar período baseado no dia (dia 15 ainda pertence à 1ª quinzena)
   const periodoSel = document.getElementById('acertoPeriodo');
-  periodoSel.value = hoje.getDate() < 15 ? '1-15' : '15-30';
+  periodoSel.value = hoje.getDate() <= 15 ? '1-15' : '15-30';
 }
 
-// — Contas avulsas temporárias (só pro período atual) —
-let contasAvulsas = [];
+// — Contas avulsas (persistidas, atreladas a mês+período, consumidas ao enviar) —
+function avulsasDoPeriodo(mes, periodo) {
+  return (STATE.avulsas || []).filter(a => !a.enviado && a.mes === mes && a.periodo === periodo);
+}
 
 function addContaAvulsa() {
-  const desc = prompt('Descrição da conta:');
-  if (!desc) return;
-  const valStr = prompt('Valor R$:');
-  if (!valStr) return;
-  const val = parseFloat(valStr.replace(/\./g,'').replace(',','.'));
+  if (!document.getElementById('acertoMes')?.value) { alert('Selecione o mês e o período primeiro.'); return; }
+  document.getElementById('avDescricao').value = '';
+  document.getElementById('avValor').value = '';
+  abrirModal('modalAvulsa');
+}
+
+function salvarContaAvulsa() {
+  const desc = document.getElementById('avDescricao').value.trim();
+  if (!desc) { alert('Informe a descrição.'); return; }
+  const val = parseFloat(document.getElementById('avValor').value.replace(/\./g,'').replace(',','.'));
   if (isNaN(val) || val <= 0) { alert('Valor inválido.'); return; }
-  // Adiciona direto no período selecionado (sem pedir dia)
+  const mes = document.getElementById('acertoMes').value;
   const periodo = document.getElementById('acertoPeriodo').value;
-  const dia = periodo === '1-15' ? 1 : 16; // Garante que cai no período certo
-  contasAvulsas.push({ id: 'av_' + Date.now(), descricao: desc.trim(), valor: val, dia });
-  // Adicionar ao HTML sem recriar tudo (preserva valores editados)
-  const container = document.getElementById('acertoContasPeriodo');
-  const subEl = document.getElementById('subtotalFixas');
-  const c = contasAvulsas[contasAvulsas.length - 1];
-  const inputId = 'acv_' + c.id;
-  const cbId = 'acb_' + c.id;
-  const novaDiv = document.createElement('div');
-  novaDiv.className = 'extra-item';
-  novaDiv.style.gap = '6px';
-  novaDiv.id = 'row_' + c.id;
-  novaDiv.innerHTML = `
-    <input type="checkbox" id="${cbId}" checked onchange="atualizarMensagem()" style="width:16px;height:16px">
-    <div class="desc" style="flex:1">${c.descricao} <span class="badge amber" style="font-size:9px">avulsa</span></div>
-    <div style="width:110px"><input type="text" id="${inputId}" value="${c.valor.toFixed(2).replace('.',',')}" onchange="atualizarMensagem()" style="width:100%;text-align:right;font-weight:600"></div>
-    <button class="icon-btn" onclick="contasAvulsas=contasAvulsas.filter(x=>x.id!=='${c.id}');document.getElementById('row_${c.id}').remove();atualizarMensagem()">🗑️</button>
-  `;
-  if (subEl) container.insertBefore(novaDiv, subEl);
-  else container.appendChild(novaDiv);
-  atualizarMensagem();
+  STATE.avulsas.push({
+    id: 'av_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+    descricao: desc, valor: val, mes, periodo, enviado: false, updatedAt: Date.now()
+  });
+  salvarState();
+  fecharModal('modalAvulsa');
+  atualizarAcertoPreservandoAjustes();
+}
+
+function excluirAvulsa(id) {
+  lixeiraAdd('avulsas', id);
+  STATE.avulsas = STATE.avulsas.filter(x => x.id !== id);
+  salvarState();
+  atualizarAcertoPreservandoAjustes();
 }
 
 // — Preview da mensagem —
@@ -2373,13 +3593,15 @@ function renderAcertoPreview() {
   const periodo = document.getElementById('acertoPeriodo')?.value;
   if (!mes || !periodo) return;
 
-  const diaMin = periodo === '1-15' ? 1 : 15;
+  // Períodos disjuntos: 1-15 = dia 1..15, 15-30 = dia 16..31
+  // (dia 15 nos dois filtros cobrava o Rogério em dobro)
+  const diaMin = periodo === '1-15' ? 1 : 16;
   const diaMax = periodo === '1-15' ? 15 : 31;
 
-  // Contas recorrentes do período + avulsas
+  // Contas recorrentes do período (por dia) + avulsas (por mês+período)
   const contasPeriodo = [
     ...STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'fixa'})),
-    ...contasAvulsas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'avulsa'}))
+    ...avulsasDoPeriodo(mes, periodo).map(c => ({...c, tipo: 'avulsa', dia: diaMin}))
   ].sort((a,b) => a.dia - b.dia);
 
   let htmlContas = '';
@@ -2391,36 +3613,43 @@ function renderAcertoPreview() {
       const cbId = 'acb_' + c.id;
       htmlContas += `<div class="extra-item" style="gap:6px">
         <input type="checkbox" id="${cbId}" checked onchange="atualizarMensagem()" style="width:16px;height:16px">
-        <div class="desc" style="flex:1">${c.descricao} <span class="small">(dia ${c.dia})</span>${c.tipo==='avulsa'?' <span class="badge amber" style="font-size:9px">avulsa</span>':''}</div>
+        <div class="desc" style="flex:1">${c.descricao} ${c.tipo==='avulsa'?'<span class="badge amber" style="font-size:9px">avulsa</span>':`<span class="small">(dia ${c.dia})</span>`}</div>
         <div style="width:110px"><input type="text" id="${inputId}" value="${c.valor.toFixed(2).replace('.',',')}" onchange="atualizarMensagem()" style="width:100%;text-align:right;font-weight:600"></div>
-        ${c.tipo==='avulsa'?`<button class="icon-btn" onclick="contasAvulsas=contasAvulsas.filter(x=>x.id!=='${c.id}');renderAcertoPreview()">🗑️</button>`:''}
+        ${c.tipo==='avulsa'?`<button class="icon-btn" onclick="excluirAvulsa('${c.id}')" title="Excluir">🗑️</button>`:''}
       </div>`;
     }
     htmlContas += `<div id="subtotalFixas" class="extra-item" style="font-weight:600;border-top:2px solid var(--border)"></div>`;
   }
   document.getElementById('acertoContasPeriodo').innerHTML = htmlContas;
 
-  // Extras pendentes
-  const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado);
+  renderAcertoExtras();
+  atualizarMensagem();
+}
+
+// Renderiza só o bloco de extras — chamado isolado ao adicionar/excluir extra
+// para não resetar os valores que a Michelle já ajustou nas contas do período
+function renderAcertoExtras() {
+  const mes = document.getElementById('acertoMes')?.value;
+  const periodo = document.getElementById('acertoPeriodo')?.value;
+  const extrasPendentes = (STATE.extras || []).filter(e => !e.enviado && extraDesteAcerto(e, mes, periodo));
+  const totalPend = (STATE.extras || []).filter(e => !e.enviado).length;
   let htmlExtras = '';
   if (!extrasPendentes.length) {
-    htmlExtras = '<div class="small" style="padding:10px;color:var(--text-dim)">Nenhum gasto extra pendente.</div>';
+    const outros = totalPend > 0 ? ` <span class="small">(${totalPend} em outros acertos)</span>` : '';
+    htmlExtras = `<div class="small" style="padding:10px;color:var(--text-dim)">Nenhum gasto extra para este acerto.${outros}</div>`;
   } else {
     for (const e of extrasPendentes) {
-      htmlExtras += `<div class="extra-item">
+      htmlExtras += `<div class="extra-item" style="gap:6px">
+        <input type="checkbox" id="exb_${e.id}" checked onchange="atualizarMensagem()" style="width:16px;height:16px" title="Desmarque para não incluir nesta mensagem">
         <div class="desc">${e.descricao} <span class="small">(${e.data})</span></div>
         <div class="val">${fmtBRL(e.valor)}</div>
+        <button class="icon-btn" onclick="moverExtraAcerto('${e.id}',1)" title="Adiar para o próximo acerto">⏭️</button>
         <button class="icon-btn" onclick="excluirExtra('${e.id}')" title="Excluir">🗑️</button>
       </div>`;
     }
-    const totalExtras = extrasPendentes.reduce((s,e) => s+e.valor, 0);
-    htmlExtras += `<div class="extra-item" style="font-weight:600;border-top:2px solid var(--border)">
-      <div class="desc">Subtotal extras</div><div class="val">${fmtBRL(totalExtras)}</div>
-    </div>`;
+    htmlExtras += `<div id="subtotalExtras" class="extra-item" style="font-weight:600;border-top:2px solid var(--border)"></div>`;
   }
   document.getElementById('acertoExtras').innerHTML = htmlExtras;
-
-  atualizarMensagem();
 }
 
 function lerContasDoFormulario() {
@@ -2428,40 +3657,47 @@ function lerContasDoFormulario() {
   const periodo = document.getElementById('acertoPeriodo')?.value;
   if (!mes || !periodo) return { contas: [], extras: [], mes, periodo };
 
-  const diaMin = periodo === '1-15' ? 1 : 15;
+  const diaMin = periodo === '1-15' ? 1 : 16;
   const diaMax = periodo === '1-15' ? 15 : 31;
 
   const contasPeriodo = [
     ...STATE.contasFixas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'fixa'})),
-    ...contasAvulsas.filter(c => c.dia >= diaMin && c.dia <= diaMax).map(c => ({...c, tipo: 'avulsa'}))
+    ...avulsasDoPeriodo(mes, periodo).map(c => ({...c, tipo: 'avulsa', dia: diaMin}))
   ].sort((a,b) => a.dia - b.dia);
 
-  // Ler valores editados e checkboxes
+  // Ler valores editados e checkboxes; guarda os ids de avulsa incluídos
   const contas = [];
+  const avulsaIdsIncluidas = [];
   for (const c of contasPeriodo) {
     const cb = document.getElementById('acb_' + c.id);
     const input = document.getElementById('acv_' + c.id);
-    if (!cb || !cb.checked) continue;
+    if (!cb || !cb.checked) continue; // sem checkbox no DOM ou desmarcada: fora da mensagem
     const val = parseFloat((input?.value || '0').replace(/\./g,'').replace(',','.'));
-    contas.push({ descricao: c.descricao, valor: isNaN(val) ? c.valor : val, dia: c.dia });
+    contas.push({ descricao: c.descricao, valor: isNaN(val) ? c.valor : val, dia: c.dia, avulsa: c.tipo === 'avulsa' });
+    if (c.tipo === 'avulsa') avulsaIdsIncluidas.push(c.id);
   }
 
-  const extras = (STATE.extras || []).filter(e => !e.enviado);
-  return { contas, extras, mes, periodo };
+  // Só entram na mensagem os extras deste acerto E marcados
+  const extras = (STATE.extras || []).filter(e => {
+    if (e.enviado) return false;
+    if (!extraDesteAcerto(e, mes, periodo)) return false;
+    const cb = document.getElementById('exb_' + e.id);
+    return !cb || cb.checked;
+  });
+  return { contas, extras, avulsaIdsIncluidas, mes, periodo };
 }
 
 function atualizarMensagem() {
   const { contas, extras, mes, periodo } = lerContasDoFormulario();
 
-  // Atualizar subtotal
-  const subEl = document.getElementById('subtotalFixas');
-  if (subEl) {
-    const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
-    subEl.innerHTML = `<div class="desc">Subtotal contas</div><div class="val">${fmtBRL(totalFixas)}</div>`;
-  }
-
   const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
   const totalExtras = extras.reduce((s,e) => s+e.valor, 0);
+
+  // Atualizar subtotais
+  const subEl = document.getElementById('subtotalFixas');
+  if (subEl) subEl.innerHTML = `<div class="desc">Subtotal contas</div><div class="val">${fmtBRL(totalFixas)}</div>`;
+  const subEx = document.getElementById('subtotalExtras');
+  if (subEx) subEx.innerHTML = `<div class="desc">Subtotal extras</div><div class="val">${fmtBRL(totalExtras)}</div>`;
   const totalGeral = totalFixas + totalExtras;
 
   let msg = `📋 *Contas ${mes} — Período ${periodo}*\n\n`;
@@ -2469,7 +3705,9 @@ function atualizarMensagem() {
   if (contas.length) {
     msg += `*Contas:*\n`;
     for (const c of contas) {
-      msg += `  • ${c.descricao} (dia ${c.dia}) — ${fmtBRL(c.valor)}\n`;
+      msg += c.avulsa
+        ? `  • ${c.descricao} — ${fmtBRL(c.valor)}\n`
+        : `  • ${c.descricao} (dia ${c.dia}) — ${fmtBRL(c.valor)}\n`;
     }
     msg += `  _Subtotal: ${fmtBRL(totalFixas)}_\n`;
   }
@@ -2504,24 +3742,37 @@ function salvarExtra() {
   if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
   const data = document.getElementById('exData').value.trim();
   if (!data) { alert('Informe a data.'); return; }
-
+  const dest = proximoAcertoDe(data);
+  if (!dest) { alert('Data inválida — use DD/MM/AAAA.'); return; }
   STATE.extras.push({
     id: 'ex_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
-    descricao, valor, data, enviado: false
+    descricao, valor, data, enviado: false,
+    mesDestino: dest.mes, periodoDestino: dest.periodo, updatedAt: Date.now()
   });
-  salvarState(); fecharModal('modalExtra'); renderAcertoPreview();
+  salvarState(); fecharModal('modalExtra');
+  // Preserva os checkboxes/valores já ajustados (extras desmarcados continuam desmarcados)
+  atualizarAcertoPreservandoAjustes();
 }
 
 function excluirExtra(id) {
+  lixeiraAdd('extras', id);
   STATE.extras = STATE.extras.filter(x => x.id !== id);
-  salvarState(); renderAcertoPreview();
+  salvarState();
+  atualizarAcertoPreservandoAjustes();
 }
 
 // — Ações da mensagem —
+function perguntarMarcarEnviado() {
+  setTimeout(() => {
+    if (confirm('Marcar este acerto como enviado?\n\n(Assim os extras desta mensagem não aparecem de novo na próxima quinzena.)')) marcarEnviado();
+  }, 600);
+}
+
 function copiarMensagem() {
   const msg = document.getElementById('acertoMsgPreview').textContent;
   navigator.clipboard.writeText(msg).then(() => {
     alert('Mensagem copiada!');
+    perguntarMarcarEnviado();
   }).catch(() => {
     // Fallback
     const ta = document.createElement('textarea');
@@ -2529,6 +3780,7 @@ function copiarMensagem() {
     ta.select(); document.execCommand('copy');
     document.body.removeChild(ta);
     alert('Mensagem copiada!');
+    perguntarMarcarEnviado();
   });
 }
 
@@ -2536,22 +3788,32 @@ function enviarWhatsApp() {
   const msg = document.getElementById('acertoMsgPreview').textContent;
   const url = 'https://wa.me/?text=' + encodeURIComponent(msg);
   window.open(url, '_blank');
+  perguntarMarcarEnviado();
 }
 
 function marcarEnviado() {
-  const { contas, extras, mes, periodo } = lerContasDoFormulario();
+  const { contas, extras, avulsaIdsIncluidas, mes, periodo } = lerContasDoFormulario();
   const msg = document.getElementById('acertoMsgPreview').textContent;
+
+  // Evita registrar o mesmo período duas vezes sem querer
+  const jaExiste = (STATE.acertos || []).find(a => a.mes === mes && a.periodo === periodo);
+  if (jaExiste && !confirm(`Já existe um acerto de ${mes} (período ${periodo}) no histórico. Registrar mesmo assim?`)) return;
 
   const totalFixas = contas.reduce((s,c) => s+c.valor, 0);
   const totalExtras = extras.reduce((s,e) => s+e.valor, 0);
 
-  // Marcar extras como enviados
+  // Marca como enviados APENAS os extras que entraram na mensagem;
+  // os desmarcados continuam pendentes para o próximo acerto
+  const idsEnviados = new Set(extras.map(e => e.id));
   for (const e of (STATE.extras || [])) {
-    if (!e.enviado) e.enviado = true;
+    if (idsEnviados.has(e.id)) e.enviado = true;
   }
 
-  // Limpar avulsas
-  contasAvulsas = [];
+  // Consome as avulsas que entraram na mensagem (viram enviadas, não somem)
+  const idsAvulsas = new Set(avulsaIdsIncluidas || []);
+  for (const a of (STATE.avulsas || [])) {
+    if (idsAvulsas.has(a.id)) { a.enviado = true; a.updatedAt = Date.now(); }
+  }
 
   // Salvar no histórico
   STATE.acertos.push({
@@ -2602,14 +3864,31 @@ function renderAcertoHistorico() {
   hist.innerHTML = html;
 }
 
+let msgAcertoAtual = '';
 function verMensagemAcerto(id) {
   const a = STATE.acertos.find(x => x.id === id);
   if (!a) return;
-  alert(a.mensagem);
+  msgAcertoAtual = a.mensagem || '';
+  document.getElementById('vaMsg').textContent = msgAcertoAtual;
+  abrirModal('modalVerAcerto');
+}
+
+function copiarMensagemAcerto() {
+  navigator.clipboard.writeText(msgAcertoAtual).then(() => alert('Mensagem copiada!')).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = msgAcertoAtual; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    alert('Mensagem copiada!');
+  });
+}
+
+function reenviarWhatsAppAcerto() {
+  window.open('https://wa.me/?text=' + encodeURIComponent(msgAcertoAtual), '_blank');
 }
 
 function excluirAcerto(id) {
   if (!confirm('Excluir este acerto do histórico?')) return;
+  lixeiraAdd('acertos', id);
   STATE.acertos = STATE.acertos.filter(x => x.id !== id);
   salvarState(); renderAcertoHistorico();
 }
@@ -2618,6 +3897,11 @@ function excluirAcerto(id) {
 // INIT
 // ============================================================================
 initApp();
+
+// PWA: registra o service worker (necessário para "Adicionar à tela inicial")
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
