@@ -3557,12 +3557,13 @@ function setOrcamento(cat, val) {
   STATE.orcamentos[cat] = n;
   salvarState();
   renderMeuMes();
+  renderOrcamentoConfig(); // atualiza o TOTAL dos limites na hora
 }
 
 function removeOrcamento(cat) {
   lixeiraAdd('orcamentos', cat);
   delete STATE.orcamentos[cat];
-  salvarState(); renderOrcamentoConfig();
+  salvarState(); renderMeuMes(); renderOrcamentoConfig();
 }
 
 // ============================================================================
