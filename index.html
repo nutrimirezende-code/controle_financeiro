@@ -249,6 +249,14 @@
 
 <!-- ==================== INÍCIO ==================== -->
 <section id="panel-inicio" class="panel active">
+  <div class="card" id="cardMeuMes">
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <h2 id="meuMesTitulo" style="margin:0">Meu Mês</h2>
+      <button class="btn sm secondary" style="margin-left:auto" onclick="document.getElementById('fileInput').click()">↻ Atualizar fatura</button>
+    </div>
+    <div id="meuMes"></div>
+  </div>
+
   <div class="card">
     <h2>Registrar gasto agora</h2>
     <div class="desc">Anote na hora que o gasto acontece — leva 5 segundos e você nunca mais esquece.</div>
@@ -1418,7 +1426,110 @@ function setPendenteCategoria(id, cat) {
   if (p) { p.categoria = cat; p.updatedAt = Date.now(); salvarState(); }
 }
 
+// ============================================================================
+// MEU MÊS — gasto por categoria do ciclo atual do cartão em uso
+// ============================================================================
+function computeMeuMes() {
+  const ativo = STATE.cartaoAtivo || '';
+  const abertaTrans = (STATE.faturaAberta && STATE.faturaAberta.transacoes || [])
+    .filter(t => !ativo || t.cartao === ativo);
+
+  // Dedução 1-para-1: cada pendente casa com no máximo UMA linha da fatura aberta
+  // (por valor+data), consumindo-a. Evita descartar dois gastos iguais de uma vez.
+  const usadas = new Set();
+  const pendentesNaoPostados = [];
+  for (const p of (STATE.pendentes || [])) {
+    if (p.conciliado) continue;
+    if (ativo && p.cartao && p.cartao !== ativo) continue; // outro cartão
+    let idx = -1, melhor = -1;
+    for (let i = 0; i < abertaTrans.length; i++) {
+      if (usadas.has(i)) continue;
+      const t = abertaTrans[i];
+      if ((t.valor < 0) !== (p.valor < 0)) continue;
+      if (Math.abs(t.valor - p.valor) > 0.10) continue;
+      const dd = diasEntreDatas(p.data, t.data);
+      if (dd === null || dd > 3) continue;
+      const score = (Math.abs(t.valor - p.valor) < 0.01 ? 2 : 1) + similaridadeEstab(p.estabelecimento, t.estabelecimento) + (3 - dd) * 0.3;
+      if (score > melhor) { melhor = score; idx = i; }
+    }
+    if (idx >= 0) usadas.add(idx); // já está na fatura → não conta o pendente de novo
+    else pendentesNaoPostados.push(p);   // ainda não postou → conta como anotado
+  }
+
+  const itens = [
+    ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor })),
+    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor }))
+  ];
+
+  const porCat = {};
+  for (const it of itens) porCat[it.categoria] = (porCat[it.categoria] || 0) + it.valor;
+  // categorias com gasto OU com meta definida
+  for (const c of Object.keys(STATE.orcamentos || {})) if (porCat[c] == null) porCat[c] = 0;
+
+  const porCategoria = Object.keys(porCat)
+    .map(cat => ({ cat, gasto: porCat[cat], limite: STATE.orcamentos[cat] || 0 }))
+    .filter(x => x.gasto !== 0 || x.limite > 0)
+    .sort((a, b) => b.gasto - a.gasto);
+
+  const total = itens.reduce((s, it) => s + it.valor, 0);
+  return { total, teto: STATE.tetoMensal || 0, porCategoria, nItens: itens.length, ativo, temAberta: !!STATE.faturaAberta };
+}
+
+function barraGasto(gasto, limite) {
+  if (!limite || limite <= 0) return `<div class="budget-bar"><div class="fill ok" style="width:0%"></div></div>`;
+  const pct = Math.min(100, Math.round(gasto / limite * 100));
+  const cls = gasto > limite ? 'over' : (gasto >= limite * 0.8 ? 'warn' : 'ok');
+  return `<div class="budget-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div>`;
+}
+
+function renderMeuMes() {
+  const el = document.getElementById('meuMes');
+  const tit = document.getElementById('meuMesTitulo');
+  const m = computeMeuMes();
+  if (tit) tit.textContent = 'Meu Mês' + (m.ativo ? ' · cartão ' + m.ativo : '');
+
+  if (!m.nItens) {
+    el.innerHTML = `<div class="small" style="color:var(--text-dim);padding:6px 0">Nenhum gasto neste ciclo ainda. Registre um gasto abaixo ou toque em "Atualizar fatura" para importar a fatura aberta (Excel).</div>`;
+    return;
+  }
+
+  let html = '';
+  // Teto total
+  if (m.teto > 0) {
+    const pct = Math.min(100, Math.round(m.total / m.teto * 100));
+    const cls = m.total > m.teto ? 'over' : (m.total >= m.teto * 0.8 ? 'warn' : 'ok');
+    const cor = cls === 'over' ? 'var(--red)' : (cls === 'warn' ? 'var(--amber)' : 'var(--green)');
+    html += `<div style="margin-bottom:14px">
+      <div class="row" style="justify-content:space-between;align-items:baseline">
+        <span style="font-size:20px;font-weight:700;color:${cor}">${fmtBRL(m.total)}</span>
+        <span class="small">de ${fmtBRL(m.teto)}${m.total > m.teto ? ` · <b style="color:var(--red)">passou ${fmtBRL(m.total - m.teto)}</b>` : ''}</span>
+      </div>
+      <div class="budget-bar" style="height:10px;margin-top:6px"><div class="fill ${cls}" style="width:${pct}%"></div></div>
+    </div>`;
+  } else {
+    html += `<div style="margin-bottom:14px;font-size:20px;font-weight:700;color:var(--accent)">${fmtBRL(m.total)} <span class="small" style="font-weight:400;color:var(--text-soft)">gasto no ciclo</span></div>`;
+  }
+
+  // Barras por categoria
+  html += '<div class="budget-grid">';
+  for (const c of m.porCategoria) {
+    const estourou = c.limite > 0 && c.gasto > c.limite;
+    html += `<div class="budget-item">
+      <div class="bud-header">
+        <span class="bud-cat">${c.cat}</span>
+        <span class="bud-vals"><b>${fmtBRL(c.gasto)}</b>${c.limite > 0 ? ' / ' + fmtBRL(c.limite) : ''}</span>
+      </div>
+      ${barraGasto(c.gasto, c.limite)}
+      ${c.limite > 0 ? `<div class="budget-pct" style="color:${estourou?'var(--red)':'var(--text-soft)'}">${Math.round(c.gasto/c.limite*100)}%${estourou?' — passou!':''}</div>` : ''}
+    </div>`;
+  }
+  html += '</div>';
+  html += `<div class="small" style="color:var(--text-dim);margin-top:10px">${m.temAberta ? 'Inclui a fatura aberta importada + ' : ''}seus lançamentos do ciclo. Define os limites por categoria em Configurações → Orçamento.</div>`;
+  el.innerHTML = html;
+}
+
 function renderInicio() {
+  renderMeuMes();
   // Selects do registro rápido
   const selCartao = document.getElementById('rrCartao');
   const cartoes = [...STATE.cartoesMichelle, 'NUBANK'];
