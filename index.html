@@ -516,6 +516,16 @@
   </div>
 
   <div class="card">
+    <h2>Assinaturas (fixos do cartão)</h2>
+    <div class="desc">Cobranças automáticas que você <b>não lança à mão</b> (Netflix, Apple, Spotify, Vivo…). Elas entram sozinhas no "Meu Mês" a cada ciclo. Quando a cobrança real aparece na fatura, ela concilia (não duplica).</div>
+    <div id="assinaturasConfig"></div>
+    <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="adicionarAssinatura()">+ Adicionar assinatura</button>
+      <button class="btn ghost" onclick="puxarAssinaturasDoHistorico()">✨ Puxar do histórico</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Backup e dados</h2>
     <div class="desc">Exporte/importe backup ou apague tudo.</div>
     <div class="row">
@@ -761,7 +771,7 @@ let sortCol = 'competencia', sortDir = -1;
 // PERSISTÊNCIA — localStorage (cache rápido) + Google Sheets (nuvem)
 // ============================================================================
 function stateDefault() {
-  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], avulsas:[], acertos:[], pendentes:[], lixeira:{}, cartaoAtivo:'', tetoMensal:0, faturaAberta:null, updatedAt:0 };
+  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], avulsas:[], acertos:[], pendentes:[], assinaturas:[], lixeira:{}, cartaoAtivo:'', tetoMensal:0, faturaAberta:null, updatedAt:0 };
 }
 
 function normalizarEstado(s) {
@@ -776,6 +786,7 @@ function normalizarEstado(s) {
   if (!s.avulsas) s.avulsas = [];
   if (!s.acertos) s.acertos = [];
   if (!s.pendentes) s.pendentes = [];
+  if (!s.assinaturas) s.assinaturas = [];
   if (!s.lixeira) s.lixeira = {};
   if (!s.cartaoAtivo) s.cartaoAtivo = (s.cartoesMichelle && s.cartoesMichelle[0]) || '';
   if (s.tetoMensal == null) s.tetoMensal = 0;
@@ -982,7 +993,7 @@ function mesclarEstados(local, nuvem) {
 
   // Lixeira: união dos dois lados, itens de mais de 90 dias saem
   const CORTE = Date.now() - 90*24*60*60*1000;
-  const TIPOS_LIXEIRA = ['faturas','extras','avulsas','acertos','contasFixas','pendentes','dicionario','categorias','cartoesMichelle','orcamentos'];
+  const TIPOS_LIXEIRA = ['faturas','extras','avulsas','acertos','contasFixas','pendentes','assinaturas','dicionario','categorias','cartoesMichelle','orcamentos'];
   resultado.lixeira = {};
   for (const tipo of TIPOS_LIXEIRA) {
     const mapa = new Map();
@@ -1012,6 +1023,7 @@ function mesclarEstados(local, nuvem) {
   mesclarColecao('contasFixas', 'contasFixas');
   mesclarColecao('acertos', 'acertos');
   mesclarColecao('pendentes', 'pendentes');
+  mesclarColecao('assinaturas', 'assinaturas');
 
   // Extras e avulsas: união por ID; vence o mais recente (updatedAt) por item,
   // mas "enviado" é pegajoso (se um lado marcou enviado, fica enviado — evita cobrar 2x).
@@ -1469,9 +1481,41 @@ function computeMeuMes() {
   const pendentesNaoPostados = (STATE.pendentes || [])
     .filter(p => !p.conciliado && (!ativo || p.cartao === ativo || !p.cartao) && !postados.has(p.id));
 
+  // Assinaturas provisionadas: cobranças automáticas ativas do cartão em uso que
+  // AINDA não apareceram na fatura aberta e que a Michelle também não anotou à mão
+  // — evita contar em dobro. Dedup 1-para-1 (consome cada linha/anotação uma vez).
+  const usadasAss = new Set();   // linhas da fatura aberta já consumidas
+  const usadasPend = new Set();  // índices de pendentesNaoPostados já consumidos
+  const provisionadas = [];
+  for (const a of (STATE.assinaturas || [])) {
+    if (!a.ativo) continue;
+    if (ativo && a.cartao && a.cartao !== ativo) continue;
+    const av = a.valor || 0;
+    let ja = false;
+    // (1) já postou na fatura aberta? Mesmo sinal (não casa com estorno negativo);
+    // nome forte (>=2) OU nome fraco (>=1) com valor quase idêntico.
+    for (let i = 0; i < abertaTrans.length; i++) {
+      if (usadasAss.has(i)) continue;
+      const t = abertaTrans[i];
+      if ((t.valor < 0) !== (av < 0)) continue;
+      const sim = similaridadeEstab(a.descricao, t.estabelecimento);
+      if (sim >= 2 || (sim >= 1 && Math.abs(t.valor - av) <= 0.10)) { usadasAss.add(i); ja = true; break; }
+    }
+    // (2) ou ela já anotou à mão? Casa por nome forte (independe do valor, cobre
+    // mudança de preço), consumindo 1-para-1 (2 assinaturas iguais ≠ 1 anotação).
+    if (!ja) {
+      for (let j = 0; j < pendentesNaoPostados.length; j++) {
+        if (usadasPend.has(j)) continue;
+        if (similaridadeEstab(a.descricao, pendentesNaoPostados[j].estabelecimento) >= 2) { usadasPend.add(j); ja = true; break; }
+      }
+    }
+    if (!ja) provisionadas.push(a);
+  }
+
   const itens = [
     ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor })),
-    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor }))
+    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor })),
+    ...provisionadas.map(a => ({ categoria: a.categoria || '??', valor: a.valor || 0 }))
   ];
 
   const porCat = {};
@@ -1485,7 +1529,9 @@ function computeMeuMes() {
     .sort((a, b) => b.gasto - a.gasto);
 
   const total = itens.reduce((s, it) => s + it.valor, 0);
-  return { total, teto: STATE.tetoMensal || 0, porCategoria, nItens: itens.length, ativo, temAberta: !!STATE.faturaAberta };
+  // Soma dos limites por categoria (o "total do limite" mostrado ao lado do total)
+  const totalLimites = Object.values(STATE.orcamentos || {}).reduce((s, v) => s + (Number(v) || 0), 0);
+  return { total, teto: STATE.tetoMensal || 0, totalLimites, porCategoria, nItens: itens.length, ativo, temAberta: !!STATE.faturaAberta, provisionadas, nProvisionadas: provisionadas.length };
 }
 
 function barraGasto(gasto, limite) {
@@ -1507,26 +1553,36 @@ function renderMeuMes() {
   }
 
   let html = '';
-  // TOTAL do ciclo — sempre em destaque no topo
-  if (m.teto > 0) {
-    const pct = Math.min(100, Math.round(m.total / m.teto * 100));
-    const cls = m.total > m.teto ? 'over' : (m.total >= m.teto * 0.8 ? 'warn' : 'ok');
+  // TOTAL do ciclo — sempre em destaque no topo. A comparação principal ao lado do
+  // total é a SOMA DOS LIMITES por categoria; se não houver, cai para o teto do mês.
+  const ref = m.totalLimites > 0 ? m.totalLimites : m.teto;
+  const refLabel = m.totalLimites > 0 ? 'em limites' : 'do teto';
+  html += `<div style="margin-bottom:16px">
+    <div class="small" style="text-transform:uppercase;letter-spacing:.4px">Total gasto no ciclo</div>`;
+  if (ref > 0) {
+    const pct = Math.min(100, Math.round(m.total / ref * 100));
+    const cls = m.total > ref ? 'over' : (m.total >= ref * 0.8 ? 'warn' : 'ok');
     const cor = cls === 'over' ? 'var(--red)' : (cls === 'warn' ? 'var(--amber)' : 'var(--green)');
-    html += `<div style="margin-bottom:16px">
-      <div class="small" style="text-transform:uppercase;letter-spacing:.4px">Total gasto no ciclo</div>
-      <div class="row" style="justify-content:space-between;align-items:baseline;margin-top:2px">
+    html += `<div class="row" style="justify-content:space-between;align-items:baseline;margin-top:2px;gap:10px">
         <span style="font-size:28px;font-weight:700;color:${cor}">${fmtBRL(m.total)}</span>
-        <span class="small">de ${fmtBRL(m.teto)} · ${m.total > m.teto ? `<b style="color:var(--red)">passou ${fmtBRL(m.total - m.teto)}</b>` : `faltam ${fmtBRL(m.teto - m.total)}`}</span>
+        <span class="small" style="text-align:right">de <b>${fmtBRL(ref)}</b> ${refLabel}<br>${m.total > ref ? `<b style="color:var(--red)">passou ${fmtBRL(m.total - ref)}</b>` : `faltam ${fmtBRL(ref - m.total)}`}</span>
       </div>
-      <div class="budget-bar" style="height:12px;margin-top:8px"><div class="fill ${cls}" style="width:${pct}%"></div></div>
-    </div>`;
+      <div class="budget-bar" style="height:12px;margin-top:8px"><div class="fill ${cls}" style="width:${pct}%"></div></div>`;
+    // Se ela definiu AMBOS (limites por categoria + teto), mostra o teto como 2ª linha
+    if (m.totalLimites > 0 && m.teto > 0) {
+      const p2 = Math.min(100, Math.round(m.total / m.teto * 100));
+      const c2 = m.total > m.teto ? 'over' : (m.total >= m.teto * 0.8 ? 'warn' : 'ok');
+      html += `<div class="row" style="justify-content:space-between;align-items:baseline;margin-top:10px">
+          <span class="small" style="text-transform:uppercase;letter-spacing:.4px;color:var(--text-soft)">Teto do mês</span>
+          <span class="small">${fmtBRL(m.total)} de ${fmtBRL(m.teto)} · ${m.total > m.teto ? `<b style="color:var(--red)">passou ${fmtBRL(m.total - m.teto)}</b>` : `faltam ${fmtBRL(m.teto - m.total)}`}</span>
+        </div>
+        <div class="budget-bar" style="height:7px;margin-top:4px"><div class="fill ${c2}" style="width:${p2}%"></div></div>`;
+    }
   } else {
-    html += `<div style="margin-bottom:16px">
-      <div class="small" style="text-transform:uppercase;letter-spacing:.4px">Total gasto no ciclo</div>
-      <div style="font-size:28px;font-weight:700;color:var(--accent);margin-top:2px">${fmtBRL(m.total)}</div>
-      <div class="small" style="color:var(--text-dim)">Defina um "Teto do mês" em Configurações para ver quanto ainda pode gastar.</div>
-    </div>`;
+    html += `<div style="font-size:28px;font-weight:700;color:var(--accent);margin-top:2px">${fmtBRL(m.total)}</div>
+      <div class="small" style="color:var(--text-dim)">Defina limites por categoria (ou um "Teto do mês") em Configurações para ver quanto ainda pode gastar.</div>`;
   }
+  html += `</div>`;
 
   // Barras por categoria
   html += '<div class="budget-grid">';
@@ -1542,7 +1598,14 @@ function renderMeuMes() {
     </div>`;
   }
   html += '</div>';
-  html += `<div class="small" style="color:var(--text-dim);margin-top:10px">${m.temAberta ? 'Inclui a fatura aberta importada + ' : ''}seus lançamentos do ciclo. Define os limites por categoria em Configurações → Orçamento.</div>`;
+  const fontes = [];
+  if (m.temAberta) fontes.push('a fatura aberta importada');
+  fontes.push('seus lançamentos do ciclo');
+  if (m.nProvisionadas > 0) fontes.push(`<b>${m.nProvisionadas} assinatura(s) provisionada(s)</b>`);
+  html += `<div class="small" style="color:var(--text-dim);margin-top:10px">Inclui ${fontes.join(' + ')}. Assinaturas e limites por categoria são configurados em Configurações.</div>`;
+  if (m.nProvisionadas > 0) {
+    html += `<div class="small" style="color:var(--text-soft);margin-top:4px">📅 Provisionadas (ainda não vieram na fatura): ${m.provisionadas.map(a => `${a.descricao} ${fmtBRL(a.valor||0)}`).join(' · ')}</div>`;
+  }
   el.innerHTML = html;
 }
 
@@ -3460,6 +3523,7 @@ function renderConfig() {
 
   // Orçamento
   renderOrcamentoConfig();
+  renderAssinaturasConfig();
   atualizarStorageInfo();
 }
 
@@ -3564,6 +3628,103 @@ function removeOrcamento(cat) {
   lixeiraAdd('orcamentos', cat);
   delete STATE.orcamentos[cat];
   salvarState(); renderMeuMes(); renderOrcamentoConfig();
+}
+
+// ============================================================================
+// ASSINATURAS (fixos do cartão) — provisionadas no Meu Mês
+// ============================================================================
+function renderAssinaturasConfig() {
+  const box = document.getElementById('assinaturasConfig');
+  if (!box) return;
+  const lista = STATE.assinaturas || [];
+  const cats = STATE.categorias.slice().sort();
+  const cartoes = [...new Set([...(STATE.cartoesMichelle || []), 'NUBANK'].filter(Boolean))];
+  if (!lista.length) {
+    box.innerHTML = `<div class="small" style="color:var(--text-dim);padding:6px 0">Nenhuma assinatura cadastrada. Toque em "Puxar do histórico" para o sistema sugerir as recorrências que ele já detectou, ou adicione à mão.</div>`;
+    return;
+  }
+  let totalAtivas = 0;
+  let html = '';
+  for (const a of lista) {
+    if (a.ativo) totalAtivas += Number(a.valor) || 0;
+    const esc = a.id;
+    const catOpts = ['<option value="??"' + (a.categoria === '??' || !a.categoria ? ' selected' : '') + '>??</option>']
+      .concat(cats.map(c => `<option value="${c}" ${a.categoria === c ? 'selected' : ''}>${c}</option>`)).join('');
+    const cartOpts = cartoes.map(c => `<option value="${c}" ${a.cartao === c ? 'selected' : ''}>${c === 'NUBANK' ? 'Nubank' : 'final ' + c}</option>`).join('');
+    html += `<div class="assinatura-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--border);${a.ativo ? '' : 'opacity:.5'}">
+      <input type="checkbox" ${a.ativo ? 'checked' : ''} onchange="toggleAssinaturaAtivo('${esc}', this.checked)" title="Ativa/inativa" style="width:auto">
+      <input type="text" value="${(a.descricao || '').replace(/"/g, '&quot;')}" placeholder="Netflix" onchange="setAssinaturaCampo('${esc}','descricao',this.value)" style="flex:1;min-width:120px">
+      <input type="number" value="${a.valor != null ? a.valor : ''}" min="0" step="0.01" placeholder="R$" onchange="setAssinaturaCampo('${esc}','valor',this.value)" style="width:90px">
+      <select onchange="setAssinaturaCampo('${esc}','categoria',this.value)" style="max-width:130px">${catOpts}</select>
+      <select onchange="setAssinaturaCampo('${esc}','cartao',this.value)" style="max-width:110px">${cartOpts}</select>
+      <button class="icon-btn" onclick="removerAssinatura('${esc}')" title="Excluir">🗑️</button>
+    </div>`;
+  }
+  html += `<div class="small" style="margin-top:10px;font-weight:600">Ativas · ${fmtBRL(totalAtivas)}/mês</div>`;
+  box.innerHTML = html;
+}
+
+function adicionarAssinatura() {
+  if (!STATE.assinaturas) STATE.assinaturas = [];
+  STATE.assinaturas.push({
+    id: 'as_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
+    descricao: '', valor: 0, categoria: '??', cartao: STATE.cartaoAtivo || '', ativo: true,
+    updatedAt: Date.now()
+  });
+  salvarState(); renderAssinaturasConfig();
+}
+
+function setAssinaturaCampo(id, campo, valor) {
+  const a = (STATE.assinaturas || []).find(x => x.id === id);
+  if (!a) return;
+  if (campo === 'valor') {
+    const n = parseFloat(String(valor || '').replace(/\./g, '').replace(',', '.'));
+    a.valor = isNaN(n) || n < 0 ? 0 : n;
+  } else {
+    a[campo] = String(valor == null ? '' : valor).trim();
+  }
+  a.updatedAt = Date.now();
+  salvarState(); renderMeuMes(); renderAssinaturasConfig();
+}
+
+function toggleAssinaturaAtivo(id, ativo) {
+  const a = (STATE.assinaturas || []).find(x => x.id === id);
+  if (!a) return;
+  a.ativo = !!ativo;
+  a.updatedAt = Date.now();
+  salvarState(); renderMeuMes(); renderAssinaturasConfig();
+}
+
+function removerAssinatura(id) {
+  const a = (STATE.assinaturas || []).find(x => x.id === id);
+  if (!a) return;
+  if (!confirm(`Remover a assinatura "${a.descricao || 'sem nome'}"?`)) return;
+  lixeiraAdd('assinaturas', id);
+  STATE.assinaturas = (STATE.assinaturas || []).filter(x => x.id !== id);
+  salvarState(); renderMeuMes(); renderAssinaturasConfig();
+}
+
+// Pré-preenche a lista com as recorrências já detectadas no histórico.
+function puxarAssinaturasDoHistorico() {
+  const { assinaturas } = detectarAssinaturas();
+  const ativas = assinaturas.filter(a => a.ativa);
+  if (!ativas.length) { alert('Nenhuma assinatura recorrente detectada no histórico ainda. Importe mais faturas ou adicione à mão.'); return; }
+  if (!STATE.assinaturas) STATE.assinaturas = [];
+  // não duplicar: pula as que já existem (por nome parecido)
+  let add = 0;
+  for (const det of ativas) {
+    const jaTem = STATE.assinaturas.some(x => similaridadeEstab(x.descricao, det.nome) >= 2);
+    if (jaTem) continue;
+    STATE.assinaturas.push({
+      id: 'as_' + Date.now() + '_' + add + Math.random().toString(36).slice(2,5),
+      descricao: det.nome, valor: Math.round((det.valorAtual || 0) * 100) / 100,
+      categoria: det.categoria || '??', cartao: STATE.cartaoAtivo || '', ativo: true,
+      updatedAt: Date.now()
+    });
+    add++;
+  }
+  salvarState(); renderMeuMes(); renderAssinaturasConfig();
+  alert(add > 0 ? `${add} assinatura(s) adicionada(s). Confira o valor, a categoria e o cartão de cada uma.` : 'Todas as assinaturas detectadas já estavam na sua lista.');
 }
 
 // ============================================================================
