@@ -1195,7 +1195,7 @@ function mostrarApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.querySelector('main').style.display = 'block';
   document.getElementById('btnLogout').style.display = 'inline-block';
-  renderInicio();
+  irParaAba('inicio'); // sempre abre na Início (reseta aba/realce de um login anterior) e renderiza
   renderFaturasList();
   atualizarStorageInfo();
 }
@@ -2600,6 +2600,8 @@ function salvarFatura() {
   FATURA_TEMP = null;
   document.getElementById('uploadStatus').innerHTML = `<div class="alert success">✓ Fatura salva! ${fmtBRL(tot)}</div>`;
   renderFaturasList();
+  renderLancamentosAberta(); // ciclo fechou: esconde o card da fatura aberta (agora null)
+  renderMeuMes();            // Meu Mês reflete o novo ciclo
   finalizarFluxoFatura();
 }
 
