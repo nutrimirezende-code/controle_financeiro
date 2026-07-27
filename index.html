@@ -1434,18 +1434,17 @@ function setPendenteCategoria(id, cat) {
 // ============================================================================
 // MEU MÊS — gasto por categoria do ciclo atual do cartão em uso
 // ============================================================================
-function computeMeuMes() {
+// Ids dos gastos anotados (pendentes) que JÁ aparecem na fatura aberta do cartão
+// em uso — casamento 1-para-1 por valor+data. Usado para não contar em dobro no
+// Meu Mês E para tirá-los do card "Gastos anotados" (não ficam soltos).
+function pendentesPostadosNaAberta() {
   const ativo = STATE.cartaoAtivo || '';
   const abertaTrans = (STATE.faturaAberta && STATE.faturaAberta.transacoes || [])
     .filter(t => !ativo || t.cartao === ativo);
-
-  // Dedução 1-para-1: cada pendente casa com no máximo UMA linha da fatura aberta
-  // (por valor+data), consumindo-a. Evita descartar dois gastos iguais de uma vez.
-  const usadas = new Set();
-  const pendentesNaoPostados = [];
+  const usadas = new Set(), postados = new Set();
   for (const p of (STATE.pendentes || [])) {
     if (p.conciliado) continue;
-    if (ativo && p.cartao && p.cartao !== ativo) continue; // outro cartão
+    if (ativo && p.cartao && p.cartao !== ativo) continue;
     let idx = -1, melhor = -1;
     for (let i = 0; i < abertaTrans.length; i++) {
       if (usadas.has(i)) continue;
@@ -1457,9 +1456,18 @@ function computeMeuMes() {
       const score = (Math.abs(t.valor - p.valor) < 0.01 ? 2 : 1) + similaridadeEstab(p.estabelecimento, t.estabelecimento) + (3 - dd) * 0.3;
       if (score > melhor) { melhor = score; idx = i; }
     }
-    if (idx >= 0) usadas.add(idx); // já está na fatura → não conta o pendente de novo
-    else pendentesNaoPostados.push(p);   // ainda não postou → conta como anotado
+    if (idx >= 0) { usadas.add(idx); postados.add(p.id); }
   }
+  return postados;
+}
+
+function computeMeuMes() {
+  const ativo = STATE.cartaoAtivo || '';
+  const abertaTrans = (STATE.faturaAberta && STATE.faturaAberta.transacoes || [])
+    .filter(t => !ativo || t.cartao === ativo);
+  const postados = pendentesPostadosNaAberta();
+  const pendentesNaoPostados = (STATE.pendentes || [])
+    .filter(p => !p.conciliado && (!ativo || p.cartao === ativo || !p.cartao) && !postados.has(p.id));
 
   const itens = [
     ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor })),
@@ -1594,13 +1602,18 @@ function renderInicio() {
 
   // Card: gastos de cartão anotados (aguardando a fatura chegar p/ conciliar)
   const cardPd = document.getElementById('cardPendentesCartao');
-  const pendentes = (STATE.pendentes || []).filter(p => !p.conciliado);
+  const postadosSet = pendentesPostadosNaAberta();
+  const todosNaoConc = (STATE.pendentes || []).filter(p => !p.conciliado);
+  const pendentes = todosNaoConc.filter(p => !postadosSet.has(p.id)); // esconde os que já estão na fatura aberta
+  const nPostados = todosNaoConc.length - pendentes.length;
   if (!pendentes.length) {
-    cardPd.style.display = 'none';
+    cardPd.style.display = nPostados > 0 ? 'block' : 'none';
+    if (nPostados > 0) document.getElementById('pendentesList').innerHTML = `<div class="small" style="color:var(--green);padding:6px 0">✓ ${nPostados} gasto(s) anotado(s) já apareceram na fatura aberta — estão contabilizados no Meu Mês.</div>`;
   } else {
     cardPd.style.display = 'block';
     const cats = STATE.categorias.slice().sort();
-    document.getElementById('pendentesList').innerHTML = pendentes.map(p => {
+    const aviso = nPostados > 0 ? `<div class="small" style="color:var(--green);padding:2px 0 8px">✓ ${nPostados} anotado(s) já apareceram na fatura aberta (contabilizados no Meu Mês). Abaixo, os que ainda não postaram:</div>` : '';
+    document.getElementById('pendentesList').innerHTML = aviso + pendentes.map(p => {
       const antigo = idadeEmDias(p.data) > 40;
       return `
       <div class="extra-item" style="gap:8px">
