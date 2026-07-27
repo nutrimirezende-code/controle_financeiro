@@ -153,7 +153,7 @@
   .bulk-bar select { background: white; color: var(--text); }
   .bulk-bar .count { font-weight: 600; }
   /* Orcamento config */
-  .orc-row { display: grid; grid-template-columns: 1fr 120px 60px; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: center; font-size: 13px; }
+  .orc-row { display: grid; grid-template-columns: 1fr 110px 110px; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: center; font-size: 13px; }
   /* Acerto */
   .acerto-periodo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   .acerto-box { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
@@ -510,9 +510,9 @@
 
   <div class="card">
     <h2>Orçamento por categoria</h2>
-    <div class="desc">Defina limites mensais. O sistema mostra barras de progresso no Histórico.</div>
+    <div class="desc">Defina quanto quer gastar por mês em cada categoria — vira a meta no "Meu Mês". A coluna "Média/mês" mostra quanto você costuma gastar (do seu histórico), pra ajudar a decidir. Deixe em branco para não ter meta.</div>
     <div id="orcamentoConfig"></div>
-    <button class="btn secondary" onclick="addOrcamentoCategoria()" style="margin-top: 12px;">+ Definir limite</button>
+    <button class="btn secondary" onclick="preencherOrcamentoPelaMedia()" style="margin-top: 12px;">✨ Pré-preencher pela média</button>
   </div>
 
   <div class="card">
@@ -1499,20 +1499,25 @@ function renderMeuMes() {
   }
 
   let html = '';
-  // Teto total
+  // TOTAL do ciclo — sempre em destaque no topo
   if (m.teto > 0) {
     const pct = Math.min(100, Math.round(m.total / m.teto * 100));
     const cls = m.total > m.teto ? 'over' : (m.total >= m.teto * 0.8 ? 'warn' : 'ok');
     const cor = cls === 'over' ? 'var(--red)' : (cls === 'warn' ? 'var(--amber)' : 'var(--green)');
-    html += `<div style="margin-bottom:14px">
-      <div class="row" style="justify-content:space-between;align-items:baseline">
-        <span style="font-size:20px;font-weight:700;color:${cor}">${fmtBRL(m.total)}</span>
-        <span class="small">de ${fmtBRL(m.teto)}${m.total > m.teto ? ` · <b style="color:var(--red)">passou ${fmtBRL(m.total - m.teto)}</b>` : ''}</span>
+    html += `<div style="margin-bottom:16px">
+      <div class="small" style="text-transform:uppercase;letter-spacing:.4px">Total gasto no ciclo</div>
+      <div class="row" style="justify-content:space-between;align-items:baseline;margin-top:2px">
+        <span style="font-size:28px;font-weight:700;color:${cor}">${fmtBRL(m.total)}</span>
+        <span class="small">de ${fmtBRL(m.teto)} · ${m.total > m.teto ? `<b style="color:var(--red)">passou ${fmtBRL(m.total - m.teto)}</b>` : `faltam ${fmtBRL(m.teto - m.total)}`}</span>
       </div>
-      <div class="budget-bar" style="height:10px;margin-top:6px"><div class="fill ${cls}" style="width:${pct}%"></div></div>
+      <div class="budget-bar" style="height:12px;margin-top:8px"><div class="fill ${cls}" style="width:${pct}%"></div></div>
     </div>`;
   } else {
-    html += `<div style="margin-bottom:14px;font-size:20px;font-weight:700;color:var(--accent)">${fmtBRL(m.total)} <span class="small" style="font-weight:400;color:var(--text-soft)">gasto no ciclo</span></div>`;
+    html += `<div style="margin-bottom:16px">
+      <div class="small" style="text-transform:uppercase;letter-spacing:.4px">Total gasto no ciclo</div>
+      <div style="font-size:28px;font-weight:700;color:var(--accent);margin-top:2px">${fmtBRL(m.total)}</div>
+      <div class="small" style="color:var(--text-dim)">Defina um "Teto do mês" em Configurações para ver quanto ainda pode gastar.</div>
+    </div>`;
   }
 
   // Barras por categoria
@@ -3483,43 +3488,54 @@ function removerCategoria(c) {
 }
 
 // Orçamento config
+// Média mensal de gasto por categoria (soma no histórico ÷ nº de competências)
+function mediaPorCategoria() {
+  const trans = todasTransacoes().map(t => ({...t, competencia: vencParaCompetencia(t.venc)})).filter(t => t.competencia);
+  const nComps = new Set(trans.map(t => t.competencia)).size || 1;
+  const soma = {};
+  for (const t of trans) { const c = t.categoria || '??'; soma[c] = (soma[c] || 0) + t.valor; }
+  const media = {};
+  for (const c of Object.keys(soma)) media[c] = Math.max(0, soma[c] / nComps);
+  return media;
+}
+
 function renderOrcamentoConfig() {
   const cats = STATE.categorias.slice().sort();
-  let html = '<div class="orc-row" style="font-weight:600;font-size:12px;color:var(--text-soft)"><div>Categoria</div><div>Limite R$</div><div></div></div>';
+  const media = mediaPorCategoria();
+  let html = '<div class="orc-row" style="font-weight:600;font-size:12px;color:var(--text-soft)"><div>Categoria</div><div>Limite R$</div><div>Média/mês</div></div>';
   for (const c of cats) {
+    if (c === '??') continue;
     const val = STATE.orcamentos[c];
-    if (val !== undefined) {
-      html += `<div class="orc-row">
-        <div>${c}</div>
-        <div><input type="number" value="${val}" min="0" step="50" onchange="setOrcamento('${c.replace(/'/g,"\\'")}', this.value)" style="width:110px"></div>
-        <div><button class="icon-btn" onclick="removeOrcamento('${c.replace(/'/g,"\\'")}')">🗑️</button></div>
-      </div>`;
-    }
+    const med = media[c] || 0;
+    const esc = c.replace(/'/g, "\\'");
+    html += `<div class="orc-row">
+      <div>${c}</div>
+      <div><input type="number" value="${val !== undefined ? val : ''}" min="0" step="50" placeholder="—" onchange="setOrcamento('${esc}', this.value)" style="width:100px"></div>
+      <div class="small" style="color:var(--text-soft)">${med > 0 ? fmtBRL(med) : '—'}</div>
+    </div>`;
   }
-  if (!Object.keys(STATE.orcamentos).length) html += '<div class="small" style="padding:8px 0">Nenhum limite definido.</div>';
   document.getElementById('orcamentoConfig').innerHTML = html;
 }
 
-function addOrcamentoCategoria() {
-  const cats = STATE.categorias.filter(c => STATE.orcamentos[c] === undefined).sort();
-  if (!cats.length) { alert('Todos os limites já estão definidos.'); return; }
-  const cat = cats[0]; // Will use first available
-  // Simple modal - let's use a prompt-like approach with a select
-  const sel = prompt(`Categoria para definir limite:\n${cats.join(', ')}`);
-  if (!sel || !cats.includes(sel)) { alert('Categoria inválida.'); return; }
-  const val = prompt(`Limite mensal para "${sel}" (R$):`, '1000');
-  if (!val) return;
-  const num = parseFloat(val.replace(/\./g,'').replace(',','.'));
-  if (isNaN(num) || num < 0) { alert('Valor inválido.'); return; }
-  lixeiraRemove('orcamentos', sel);
-  STATE.orcamentos[sel] = num;
+// Pré-preenche todos os limites com a média mensal do histórico (arredondada)
+function preencherOrcamentoPelaMedia() {
+  const media = mediaPorCategoria();
+  const cats = Object.keys(media).filter(c => c !== '??' && media[c] > 0);
+  if (!cats.length) { alert('Ainda não há histórico suficiente para calcular médias. Importe algumas faturas primeiro.'); return; }
+  if (!confirm(`Pré-preencher os limites de ${cats.length} categoria(s) com a média mensal do seu histórico? Você pode ajustar cada um depois.`)) return;
+  for (const c of cats) { lixeiraRemove('orcamentos', c); STATE.orcamentos[c] = Math.round(media[c]); }
   salvarState(); renderConfig();
 }
 
 function setOrcamento(cat, val) {
+  const v = String(val == null ? '' : val).trim();
+  if (v === '') { removeOrcamento(cat); return; }
+  const n = parseFloat(v.replace(/\./g, '').replace(',', '.'));
+  if (isNaN(n) || n < 0) return;
   lixeiraRemove('orcamentos', cat);
-  STATE.orcamentos[cat] = parseFloat(val) || 0;
+  STATE.orcamentos[cat] = n;
   salvarState();
+  renderMeuMes();
 }
 
 function removeOrcamento(cat) {
