@@ -1512,26 +1512,33 @@ function computeMeuMes() {
     if (!ja) provisionadas.push(a);
   }
 
+  // Cada item marcado pela FONTE: oficial (veio da fatura importada, é o valor real),
+  // manual (anotado à mão — provisório, será substituído pela fatura), assinatura
+  // (recorrência ainda não cobrada na fatura).
   const itens = [
-    ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor })),
-    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor })),
-    ...provisionadas.map(a => ({ categoria: a.categoria || '??', valor: a.valor || 0 }))
+    ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor, fonte: 'oficial' })),
+    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor, fonte: 'manual' })),
+    ...provisionadas.map(a => ({ categoria: a.categoria || '??', valor: a.valor || 0, fonte: 'assinatura' }))
   ];
 
+  const zero = () => ({ oficial: 0, manual: 0, assinatura: 0 });
   const porCat = {};
-  for (const it of itens) porCat[it.categoria] = (porCat[it.categoria] || 0) + it.valor;
+  for (const it of itens) { (porCat[it.categoria] || (porCat[it.categoria] = zero()))[it.fonte] += it.valor; }
   // categorias com gasto OU com meta definida
-  for (const c of Object.keys(STATE.orcamentos || {})) if (porCat[c] == null) porCat[c] = 0;
+  for (const c of Object.keys(STATE.orcamentos || {})) if (!porCat[c]) porCat[c] = zero();
 
   const porCategoria = Object.keys(porCat)
-    .map(cat => ({ cat, gasto: porCat[cat], limite: STATE.orcamentos[cat] || 0 }))
+    .map(cat => { const p = porCat[cat]; const gasto = p.oficial + p.manual + p.assinatura;
+      return { cat, gasto, oficial: p.oficial, manual: p.manual, assinatura: p.assinatura, limite: STATE.orcamentos[cat] || 0 }; })
     .filter(x => x.gasto !== 0 || x.limite > 0)
     .sort((a, b) => b.gasto - a.gasto);
 
-  const total = itens.reduce((s, it) => s + it.valor, 0);
+  const soma = f => itens.filter(i => i.fonte === f).reduce((s, i) => s + i.valor, 0);
+  const totalOficial = soma('oficial'), totalManual = soma('manual'), totalAssinatura = soma('assinatura');
+  const total = totalOficial + totalManual + totalAssinatura;
   // Soma dos limites por categoria (o "total do limite" mostrado ao lado do total)
   const totalLimites = Object.values(STATE.orcamentos || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-  return { total, teto: STATE.tetoMensal || 0, totalLimites, porCategoria, nItens: itens.length, ativo, temAberta: !!STATE.faturaAberta, provisionadas, nProvisionadas: provisionadas.length };
+  return { total, totalOficial, totalManual, totalAssinatura, teto: STATE.tetoMensal || 0, totalLimites, porCategoria, nItens: itens.length, ativo, temAberta: !!STATE.faturaAberta, provisionadas, nProvisionadas: provisionadas.length };
 }
 
 function barraGasto(gasto, limite) {
@@ -1539,6 +1546,29 @@ function barraGasto(gasto, limite) {
   const pct = Math.min(100, Math.round(gasto / limite * 100));
   const cls = gasto > limite ? 'over' : (gasto >= limite * 0.8 ? 'warn' : 'ok');
   return `<div class="budget-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div>`;
+}
+
+// Cores das 3 fontes do Meu Mês (usadas na barra empilhada e na legenda)
+const COR_OFICIAL = 'var(--accent)';   // veio da fatura (valor real, confirmado)
+const COR_MANUAL  = 'var(--amber)';    // anotado à mão (provisório, será substituído)
+const COR_ASSIN   = '#a855f7';         // assinatura (ainda não veio na fatura)
+
+// Barra empilhada: mostra a composição do gasto (oficial + anotado + assinatura)
+// numa escala de max(total, limite). Um tracinho marca o limite quando há folga.
+function barraEmpilhada(oficial, manual, assinatura, limite) {
+  oficial = oficial || 0; manual = manual || 0; assinatura = assinatura || 0;
+  const total = oficial + manual + assinatura;
+  const escala = Math.max(total, limite || 0) || 1;
+  const w = v => Math.max(0, v / escala * 100);
+  let segs = '';
+  if (oficial > 0)    segs += `<div style="width:${w(oficial)}%;background:${COR_OFICIAL}" title="Oficial (da fatura)"></div>`;
+  if (manual > 0)     segs += `<div style="width:${w(manual)}%;background:${COR_MANUAL}" title="Anotado à mão (provisório)"></div>`;
+  if (assinatura > 0) segs += `<div style="width:${w(assinatura)}%;background:${COR_ASSIN}" title="Assinatura (ainda não veio)"></div>`;
+  // Quando estoura, a escala vira o total (barra cheia) e um tracinho marca onde
+  // estava o limite — mostra o quanto passou. Abaixo do limite, sobra espaço à direita.
+  const marcador = (limite > 0 && total > limite)
+    ? `<div style="position:absolute;left:${w(limite)}%;top:0;bottom:0;width:2px;background:var(--text);opacity:.7" title="Limite: ${fmtBRL(limite)}"></div>` : '';
+  return `<div class="budget-bar" style="display:flex;position:relative">${segs}${marcador}</div>`;
 }
 
 function renderMeuMes() {
@@ -1582,29 +1612,44 @@ function renderMeuMes() {
     html += `<div style="font-size:28px;font-weight:700;color:var(--accent);margin-top:2px">${fmtBRL(m.total)}</div>
       <div class="small" style="color:var(--text-dim)">Defina limites por categoria (ou um "Teto do mês") em Configurações para ver quanto ainda pode gastar.</div>`;
   }
+  // Composição do total por FONTE (oficial / a confirmar / assinaturas)
+  const dot = cor => `<span style="width:10px;height:10px;border-radius:2px;background:${cor};display:inline-block;flex:none"></span>`;
+  const leg = [];
+  if (m.totalOficial > 0)    leg.push(`<span class="row" style="gap:5px;align-items:center">${dot(COR_OFICIAL)}${fmtBRL(m.totalOficial)} oficial</span>`);
+  if (m.totalManual > 0)     leg.push(`<span class="row" style="gap:5px;align-items:center">${dot(COR_MANUAL)}${fmtBRL(m.totalManual)} a confirmar</span>`);
+  if (m.totalAssinatura > 0) leg.push(`<span class="row" style="gap:5px;align-items:center">${dot(COR_ASSIN)}${fmtBRL(m.totalAssinatura)} assinaturas</span>`);
+  if (m.totalManual > 0 || m.totalAssinatura > 0) {
+    html += `<div class="row" style="gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--text-soft);margin:-6px 0 16px">${leg.join('')}</div>`;
+  }
   html += `</div>`;
 
-  // Barras por categoria
+  // Barras por categoria — empilhadas por fonte
   html += '<div class="budget-grid">';
   for (const c of m.porCategoria) {
     const estourou = c.limite > 0 && c.gasto > c.limite;
+    const partes = [];
+    if (c.oficial > 0)    partes.push(`<span style="color:${COR_OFICIAL}">${fmtBRL(c.oficial)}</span>`);
+    if (c.manual > 0)     partes.push(`<span style="color:${COR_MANUAL}">${fmtBRL(c.manual)}</span>`);
+    if (c.assinatura > 0) partes.push(`<span style="color:${COR_ASSIN}">${fmtBRL(c.assinatura)}</span>`);
+    const detalhe = partes.length > 1 ? partes.join(' + ') : '';
+    const pct = c.limite > 0 ? `${Math.round(c.gasto/c.limite*100)}%${estourou?' — passou!':''}` : '';
+    const rodape = [pct, detalhe].filter(Boolean).join(' · ');
     html += `<div class="budget-item">
       <div class="bud-header">
         <span class="bud-cat">${c.cat}</span>
         <span class="bud-vals"><b>${fmtBRL(c.gasto)}</b>${c.limite > 0 ? ' / ' + fmtBRL(c.limite) : ''}</span>
       </div>
-      ${barraGasto(c.gasto, c.limite)}
-      ${c.limite > 0 ? `<div class="budget-pct" style="color:${estourou?'var(--red)':'var(--text-soft)'}">${Math.round(c.gasto/c.limite*100)}%${estourou?' — passou!':''}</div>` : ''}
+      ${barraEmpilhada(c.oficial, c.manual, c.assinatura, c.limite)}
+      ${rodape ? `<div class="budget-pct" style="color:${estourou?'var(--red)':'var(--text-soft)'}">${rodape}</div>` : ''}
     </div>`;
   }
   html += '</div>';
-  const fontes = [];
-  if (m.temAberta) fontes.push('a fatura aberta importada');
-  fontes.push('seus lançamentos do ciclo');
-  if (m.nProvisionadas > 0) fontes.push(`<b>${m.nProvisionadas} assinatura(s) provisionada(s)</b>`);
-  html += `<div class="small" style="color:var(--text-dim);margin-top:10px">Inclui ${fontes.join(' + ')}. Assinaturas e limites por categoria são configurados em Configurações.</div>`;
+  html += `<div class="small" style="color:var(--text-dim);margin-top:12px;line-height:1.5">
+    <b style="color:${COR_OFICIAL}">Oficial</b> = já veio na fatura (valor real) ·
+    <b style="color:${COR_MANUAL}">a confirmar</b> = anotado à mão, a fatura vai substituir ·
+    <b style="color:${COR_ASSIN}">assinaturas</b> = recorrências que ainda não vieram. Configure em Configurações.</div>`;
   if (m.nProvisionadas > 0) {
-    html += `<div class="small" style="color:var(--text-soft);margin-top:4px">📅 Provisionadas (ainda não vieram na fatura): ${m.provisionadas.map(a => `${a.descricao} ${fmtBRL(a.valor||0)}`).join(' · ')}</div>`;
+    html += `<div class="small" style="color:var(--text-soft);margin-top:4px">📅 Assinaturas provisionadas: ${m.provisionadas.map(a => `${a.descricao} ${fmtBRL(a.valor||0)}`).join(' · ')}</div>`;
   }
   el.innerHTML = html;
 }
