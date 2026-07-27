@@ -1881,7 +1881,9 @@ function classificarTransacoes() {
     }
   }
   FATURA_TEMP.transacoes = todas;
-  FATURA_TEMP.numConciliados = conciliarPendentes();
+  // Fatura aberta não consome os pendentes (a dedução acontece no cálculo do Meu Mês);
+  // só a fatura fechada concilia de verdade.
+  FATURA_TEMP.numConciliados = FATURA_TEMP.aberta ? 0 : conciliarPendentes();
   revSort = { col: null, dir: 1 }; // começa na ordem do PDF
   mostrarRevisao();
 }
@@ -2172,6 +2174,24 @@ function salvarFatura() {
     }
   }
 
+  // Fatura ABERTA (parcial): guarda um retrato para o "Meu Mês" — NÃO arquiva em
+  // faturas[] nem consome pendentes. Reimportar substitui o retrato inteiro.
+  if (FATURA_TEMP.aberta) {
+    STATE.faturaAberta = {
+      transacoes: FATURA_TEMP.transacoes,
+      venc: FATURA_TEMP.venc, arquivo: FATURA_TEMP.arquivo,
+      importadaEm: Date.now()
+    };
+    salvarState();
+    fecharModal('modalClassificar');
+    const totA = FATURA_TEMP.transacoes.reduce((s,t)=>s+t.valor,0);
+    FATURA_TEMP = null;
+    document.getElementById('uploadStatus').innerHTML = `<div class="alert success">✓ Fatura aberta atualizada! ${fmtBRL(totA)} — veja no "Meu Mês".</div>`;
+    renderInicio();
+    finalizarFluxoFatura();
+    return;
+  }
+
   // Substituição (reabrir/re-upload): a antiga só sai agora, no salvamento
   if (FATURA_TEMP.substituiId) {
     if (FATURA_TEMP.substituiId !== FATURA_TEMP.id) lixeiraAdd('faturas', FATURA_TEMP.substituiId);
@@ -2204,6 +2224,8 @@ function salvarFatura() {
     dataAdd: new Date().toISOString(),
     updatedAt: Date.now()
   });
+  // Uma fatura fechada fecha o ciclo: o retrato da fatura aberta não vale mais
+  STATE.faturaAberta = null;
   salvarState();
   fecharModal('modalClassificar');
   const tot = FATURA_TEMP.transacoes.reduce((s,t)=>s+t.valor,0);
