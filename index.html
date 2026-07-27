@@ -3503,10 +3503,13 @@ function renderOrcamentoConfig() {
   const cats = STATE.categorias.slice().sort();
   const media = mediaPorCategoria();
   let html = '<div class="orc-row" style="font-weight:600;font-size:12px;color:var(--text-soft)"><div>Categoria</div><div>Limite R$</div><div>Média/mês</div></div>';
+  let totLimite = 0, totMedia = 0;
   for (const c of cats) {
     if (c === '??') continue;
     const val = STATE.orcamentos[c];
     const med = media[c] || 0;
+    if (val !== undefined) totLimite += Number(val) || 0;
+    totMedia += med;
     const esc = c.replace(/'/g, "\\'");
     html += `<div class="orc-row">
       <div>${c}</div>
@@ -3514,6 +3517,11 @@ function renderOrcamentoConfig() {
       <div class="small" style="color:var(--text-soft)">${med > 0 ? fmtBRL(med) : '—'}</div>
     </div>`;
   }
+  html += `<div class="orc-row" style="font-weight:700;border-top:2px solid var(--border);border-bottom:none;margin-top:2px">
+    <div>TOTAL</div>
+    <div>${fmtBRL(totLimite)}</div>
+    <div style="font-weight:700">${fmtBRL(totMedia)}</div>
+  </div>`;
   document.getElementById('orcamentoConfig').innerHTML = html;
 }
 
