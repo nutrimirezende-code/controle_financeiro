@@ -275,9 +275,10 @@
       <input type="text" id="rrDesc" placeholder="O que foi? (ex: farmácia, feira, uniforme...)" class="rr-desc">
     </div>
     <div class="rr-row rr-campos">
+      <label class="small">Data: <input type="date" id="rrData"></label>
       <label class="small">Cartão: <select id="rrCartao"></select></label>
       <label class="small">Categoria: <select id="rrCategoria"></select></label>
-      <span class="small" style="color:var(--text-dim)">(só para gasto no cartão)</span>
+      <span class="small" style="color:var(--text-dim)">(cartão/categoria só para gasto no cartão)</span>
     </div>
     <div class="rr-botoes">
       <button class="btn" onclick="registrarGastoAcerto()">💰 É pro acerto com Rogério</button>
@@ -1426,19 +1427,34 @@ function irParaAba(tab) {
 function hojeBR() {
   return new Date().toLocaleDateString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric'});
 }
+// Data de hoje no formato do <input type="date"> (AAAA-MM-DD)
+function hojeISO() {
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
 
 function lerRegistroRapido() {
   const valorStr = document.getElementById('rrValor').value.replace(/R\$\s*/i,'').trim();
   const valor = parseFloat(valorStr.replace(/\./g,'').replace(',','.'));
   const desc = document.getElementById('rrDesc').value.trim();
+  // data escolhida (padrão hoje); converte AAAA-MM-DD → DD/MM/AAAA
+  let data = hojeBR();
+  const inpData = document.getElementById('rrData');
+  if (inpData && inpData.value) {
+    const p = inpData.value.split('-');
+    if (p.length === 3) data = `${p[2]}/${p[1]}/${p[0]}`;
+  }
   if (isNaN(valor) || valor <= 0) { alert('Digite o valor do gasto.'); return null; }
   if (!desc) { alert('Descreva o gasto em poucas palavras.'); return null; }
-  return { valor, desc };
+  return { valor, desc, data };
 }
 
 function rrFeedback(msg) {
   document.getElementById('rrValor').value = '';
   document.getElementById('rrDesc').value = '';
+  const inpData = document.getElementById('rrData');
+  if (inpData) inpData.value = hojeISO(); // volta pra hoje para o próximo lançamento
   const st = document.getElementById('rrStatus');
   st.innerHTML = `<div class="alert success">${msg}</div>`;
   setTimeout(() => { st.innerHTML = ''; }, 3500);
@@ -1447,11 +1463,10 @@ function rrFeedback(msg) {
 function registrarGastoAcerto() {
   const r = lerRegistroRapido();
   if (!r) return;
-  const dataHoje = hojeBR();
-  const dest = proximoAcertoDe(dataHoje) || {};
+  const dest = proximoAcertoDe(r.data) || {};
   STATE.extras.push({
     id: 'ex_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
-    descricao: r.desc, valor: r.valor, data: dataHoje, enviado: false,
+    descricao: r.desc, valor: r.valor, data: r.data, enviado: false,
     mesDestino: dest.mes || null, periodoDestino: dest.periodo || null, updatedAt: Date.now()
   });
   salvarState();
@@ -1465,7 +1480,7 @@ function registrarGastoCartao() {
   if (!r) return;
   STATE.pendentes.push({
     id: 'pd_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
-    data: hojeBR(), estabelecimento: r.desc, valor: r.valor,
+    data: r.data, estabelecimento: r.desc, valor: r.valor,
     cartao: document.getElementById('rrCartao').value,
     categoria: document.getElementById('rrCategoria').value,
     conciliado: false, updatedAt: Date.now()
@@ -1541,7 +1556,11 @@ function computeMeuMes() {
       if (usadasAss.has(i)) continue;
       const t = abertaTrans[i];
       if ((t.valor < 0) !== (av < 0)) continue;
-      const sim = similaridadeEstab(a.descricao, t.estabelecimento);
+      // casa pelo apelido (como aparece na fatura) OU pela descrição
+      const sim = Math.max(
+        similaridadeEstab(a.descricao, t.estabelecimento),
+        a.apelidoFatura ? similaridadeEstab(a.apelidoFatura, t.estabelecimento) : 0
+      );
       if (sim >= 2 || (sim >= 1 && Math.abs(t.valor - av) <= 0.10)) { usadasAss.add(i); ja = true; break; }
     }
     // (2) ou ela já anotou à mão? Casa por nome forte (independe do valor, cobre
@@ -1559,20 +1578,23 @@ function computeMeuMes() {
   // manual (anotado à mão — provisório, será substituído pela fatura), assinatura
   // (recorrência ainda não cobrada na fatura).
   const itens = [
-    ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor, fonte: 'oficial' })),
-    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor, fonte: 'manual' })),
-    ...provisionadas.map(a => ({ categoria: a.categoria || '??', valor: a.valor || 0, fonte: 'assinatura' }))
+    ...abertaTrans.map(t => ({ categoria: t.categoria || '??', valor: t.valor, fonte: 'oficial', estab: t.estabelecimento, data: t.data })),
+    ...pendentesNaoPostados.map(p => ({ categoria: p.categoria || '??', valor: p.valor, fonte: 'manual', estab: p.estabelecimento, data: p.data })),
+    ...provisionadas.map(a => ({ categoria: a.categoria || '??', valor: a.valor || 0, fonte: 'assinatura', estab: a.descricao, data: null }))
   ];
 
   const zero = () => ({ oficial: 0, manual: 0, assinatura: 0 });
-  const porCat = {};
-  for (const it of itens) { (porCat[it.categoria] || (porCat[it.categoria] = zero()))[it.fonte] += it.valor; }
+  const porCat = {}, porCatItens = {};
+  for (const it of itens) {
+    (porCat[it.categoria] || (porCat[it.categoria] = zero()))[it.fonte] += it.valor;
+    (porCatItens[it.categoria] || (porCatItens[it.categoria] = [])).push(it);
+  }
   // categorias com gasto OU com meta definida
   for (const c of Object.keys(STATE.orcamentos || {})) if (!porCat[c]) porCat[c] = zero();
 
   const porCategoria = Object.keys(porCat)
     .map(cat => { const p = porCat[cat]; const gasto = p.oficial + p.manual + p.assinatura;
-      return { cat, gasto, oficial: p.oficial, manual: p.manual, assinatura: p.assinatura, limite: STATE.orcamentos[cat] || 0 }; })
+      return { cat, gasto, oficial: p.oficial, manual: p.manual, assinatura: p.assinatura, limite: STATE.orcamentos[cat] || 0, itens: porCatItens[cat] || [] }; })
     .filter(x => x.gasto !== 0 || x.limite > 0)
     .sort((a, b) => b.gasto - a.gasto);
 
@@ -1612,6 +1634,40 @@ function barraEmpilhada(oficial, manual, assinatura, limite) {
   const marcador = (limite > 0 && total > limite)
     ? `<div style="position:absolute;left:${w(limite)}%;top:0;bottom:0;width:2px;background:var(--text);opacity:.7" title="Limite: ${fmtBRL(limite)}"></div>` : '';
   return `<div class="budget-bar" style="display:flex;position:relative">${segs}${marcador}</div>`;
+}
+
+// Categorias com o detalhamento aberto no Meu Mês
+let meuMesExpandido = new Set();
+function toggleCategoriaDetalhe(cat) {
+  if (meuMesExpandido.has(cat)) meuMesExpandido.delete(cat); else meuMesExpandido.add(cat);
+  renderMeuMes();
+}
+
+// Lançamentos de uma categoria, agrupados por fonte com subtotal
+function detalheCategoria(itens) {
+  const grupos = [
+    { fonte: 'manual',     label: 'Anotado por você',         cor: COR_MANUAL },
+    { fonte: 'assinatura', label: 'Assinatura (não lançada)', cor: COR_ASSIN },
+    { fonte: 'oficial',    label: 'Fatura aberta (oficial)',  cor: COR_OFICIAL }
+  ];
+  let html = '<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:8px" onclick="event.stopPropagation()">';
+  let algum = false;
+  for (const g of grupos) {
+    const its = (itens || []).filter(x => x.fonte === g.fonte);
+    if (!its.length) continue;
+    algum = true;
+    const sub = its.reduce((s, x) => s + (x.valor || 0), 0);
+    html += `<div class="row" style="justify-content:space-between;margin-top:8px">
+        <span class="small" style="font-weight:700;color:${g.cor}">${g.label}</span>
+        <span class="small" style="font-weight:700;color:${g.cor}">${fmtBRL(sub)}</span></div>`;
+    for (const x of its) {
+      html += `<div class="row" style="justify-content:space-between;font-size:12px;color:var(--text-soft);padding:1px 0 1px 10px;gap:8px">
+          <span>${x.estab || '—'}${x.data ? ` <span style="color:var(--text-dim)">(${x.data})</span>` : ''}</span>
+          <span style="white-space:nowrap">${fmtBRL(x.valor)}</span></div>`;
+    }
+  }
+  html += '</div>';
+  return algum ? html : '<div class="small" style="color:var(--text-dim);margin-top:8px" onclick="event.stopPropagation()">Sem itens nesta categoria ainda.</div>';
 }
 
 function renderMeuMes() {
@@ -1666,7 +1722,8 @@ function renderMeuMes() {
   }
   html += `</div>`;
 
-  // Barras por categoria — empilhadas por fonte
+  // Barras por categoria — empilhadas por fonte. Cada caixinha é clicável e abre
+  // os lançamentos, agrupados por fonte com subtotal.
   html += '<div class="budget-grid">';
   for (const c of m.porCategoria) {
     const estourou = c.limite > 0 && c.gasto > c.limite;
@@ -1677,13 +1734,16 @@ function renderMeuMes() {
     const detalhe = partes.length > 1 ? partes.join(' + ') : '';
     const pct = c.limite > 0 ? `${Math.round(c.gasto/c.limite*100)}%${estourou?' — passou!':''}` : '';
     const rodape = [pct, detalhe].filter(Boolean).join(' · ');
-    html += `<div class="budget-item">
+    const exp = meuMesExpandido.has(c.cat);
+    const catAttr = c.cat.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    html += `<div class="budget-item" onclick="toggleCategoriaDetalhe('${catAttr}')" style="cursor:pointer">
       <div class="bud-header">
-        <span class="bud-cat">${c.cat}</span>
+        <span class="bud-cat">${exp ? '▾' : '▸'} ${c.cat}</span>
         <span class="bud-vals"><b>${fmtBRL(c.gasto)}</b>${c.limite > 0 ? ' / ' + fmtBRL(c.limite) : ''}</span>
       </div>
       ${barraEmpilhada(c.oficial, c.manual, c.assinatura, c.limite)}
       ${rodape ? `<div class="budget-pct" style="color:${estourou?'var(--red)':'var(--text-soft)'}">${rodape}</div>` : ''}
+      ${exp ? detalheCategoria(c.itens) : ''}
     </div>`;
   }
   html += '</div>';
@@ -1781,6 +1841,9 @@ function setAbertaObs(idx, val) {
 
 function renderInicio() {
   renderMeuMes();
+  // Data do registro rápido: hoje por padrão (não mexe se ela já escolheu outra)
+  const inpData = document.getElementById('rrData');
+  if (inpData && !inpData.value) inpData.value = hojeISO();
   // Selects do registro rápido
   const selCartao = document.getElementById('rrCartao');
   const cartoes = [...STATE.cartoesMichelle, 'NUBANK'];
@@ -3828,17 +3891,32 @@ function renderAssinaturasConfig() {
     const catOpts = ['<option value="??"' + (a.categoria === '??' || !a.categoria ? ' selected' : '') + '>??</option>']
       .concat(cats.map(c => `<option value="${c}" ${a.categoria === c ? 'selected' : ''}>${c}</option>`)).join('');
     const cartOpts = cartoes.map(c => `<option value="${c}" ${a.cartao === c ? 'selected' : ''}>${c === 'NUBANK' ? 'Nubank' : 'final ' + c}</option>`).join('');
-    html += `<div class="assinatura-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--border);${a.ativo ? '' : 'opacity:.5'}">
-      <input type="checkbox" ${a.ativo ? 'checked' : ''} onchange="toggleAssinaturaAtivo('${esc}', this.checked)" title="Ativa/inativa" style="width:auto">
-      <input type="text" value="${(a.descricao || '').replace(/"/g, '&quot;')}" placeholder="Netflix" onchange="setAssinaturaCampo('${esc}','descricao',this.value)" style="flex:1;min-width:120px">
-      <input type="number" value="${a.valor != null ? a.valor : ''}" min="0" step="0.01" placeholder="R$" onchange="setAssinaturaCampo('${esc}','valor',this.value)" style="width:90px">
-      <select onchange="setAssinaturaCampo('${esc}','categoria',this.value)" style="max-width:130px">${catOpts}</select>
-      <select onchange="setAssinaturaCampo('${esc}','cartao',this.value)" style="max-width:110px">${cartOpts}</select>
-      <button class="icon-btn" onclick="removerAssinatura('${esc}')" title="Excluir">🗑️</button>
+    const descEsc = (a.descricao || '').replace(/"/g, '&quot;');
+    const apelidoEsc = (a.apelidoFatura || '').replace(/"/g, '&quot;');
+    const valorFmt = (a.valor != null && a.valor !== '') ? String(a.valor).replace('.', ',') : '';
+    html += `<div class="assinatura-row" style="padding:10px 0;border-bottom:1px solid var(--border);${a.ativo ? '' : 'opacity:.55'}">
+      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="checkbox" ${a.ativo ? 'checked' : ''} onchange="toggleAssinaturaAtivo('${esc}', this.checked)" title="Ativa/inativa" style="width:auto">
+        <input type="text" value="${descEsc}" placeholder="Netflix" onchange="setAssinaturaCampo('${esc}','descricao',this.value)" style="flex:1;min-width:120px">
+        <input type="text" inputmode="decimal" value="${valorFmt}" placeholder="R$ 0,00" onchange="setAssinaturaCampo('${esc}','valor',this.value)" style="width:100px" title="Valor por mês (pode usar vírgula)">
+        <button class="icon-btn" onclick="removerAssinatura('${esc}')" title="Excluir">🗑️</button>
+      </div>
+      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <select onchange="setAssinaturaCampo('${esc}','categoria',this.value)" style="max-width:140px">${catOpts}</select>
+        <select onchange="setAssinaturaCampo('${esc}','cartao',this.value)" style="max-width:120px">${cartOpts}</select>
+        <input type="text" value="${apelidoEsc}" placeholder="como aparece na fatura (opcional)" onchange="setAssinaturaCampo('${esc}','apelidoFatura',this.value)" style="flex:1;min-width:150px" title="Se na fatura o nome for diferente (ex.: 'NETFLIX.COM' em vez de 'Netflix'), escreva aqui como aparece — ajuda a casar certo, mesmo com valor um pouco diferente.">
+      </div>
     </div>`;
   }
-  html += `<div class="small" style="margin-top:10px;font-weight:600">Ativas · ${fmtBRL(totalAtivas)}/mês</div>`;
+  html += `<div class="small" id="assinaturasTotalLinha" style="margin-top:10px;font-weight:600">Ativas · ${fmtBRL(totalAtivas)}/mês</div>`;
   box.innerHTML = html;
+}
+
+function atualizarTotalAssinaturas() {
+  const el = document.getElementById('assinaturasTotalLinha');
+  if (!el) return;
+  const tot = (STATE.assinaturas || []).filter(a => a.ativo).reduce((s, a) => s + (Number(a.valor) || 0), 0);
+  el.textContent = `Ativas · ${fmtBRL(tot)}/mês`;
 }
 
 function adicionarAssinatura() {
@@ -3861,7 +3939,7 @@ function setAssinaturaCampo(id, campo, valor) {
     a[campo] = String(valor == null ? '' : valor).trim();
   }
   a.updatedAt = Date.now();
-  salvarState(); renderMeuMes(); renderAssinaturasConfig();
+  salvarState(); renderMeuMes(); atualizarTotalAssinaturas(); // não re-renderiza a lista (não perde o foco)
 }
 
 function toggleAssinaturaAtivo(id, ativo) {
