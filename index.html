@@ -257,6 +257,15 @@
     <div id="meuMes"></div>
   </div>
 
+  <div class="card" id="cardLancamentosAberta" style="display:none">
+    <div class="row" style="margin-bottom:6px;align-items:center">
+      <h2 style="margin:0">Lançamentos da fatura aberta</h2>
+      <button class="btn sm ghost" style="margin-left:auto" id="btnToggleAberta" onclick="toggleLancamentosAberta()">Ver</button>
+    </div>
+    <div class="desc">A fatura parcial que você importou. Classifique cada lançamento para o Meu Mês ficar certo. Quando a fatura fechar, isto é substituído automaticamente.</div>
+    <div id="lancamentosAbertaBox"></div>
+  </div>
+
   <div class="card">
     <h2>Registrar gasto agora</h2>
     <div class="desc">Anote na hora que o gasto acontece — leva 5 segundos e você nunca mais esquece.</div>
@@ -1654,8 +1663,78 @@ function renderMeuMes() {
   el.innerHTML = html;
 }
 
+// ---- Lançamentos da fatura aberta (parcial): lista editável na Início ----
+let abertaExpandido = false;
+let abertaSort = 'valor';        // valor | data | categoria | descricao
+let abertaSoNaoClass = false;
+function toggleLancamentosAberta() { abertaExpandido = !abertaExpandido; renderLancamentosAberta(); }
+function setAbertaSort(v) { abertaSort = v; renderLancamentosAberta(); }
+function toggleAbertaSoNaoClass(v) { abertaSoNaoClass = !!v; renderLancamentosAberta(); }
+function ordDataCurta(s) { const p = (s || '').split('/'); return (+p[1] || 0) * 100 + (+p[0] || 0); }
+
+function setAbertaCategoria(idx, cat) {
+  const fa = STATE.faturaAberta;
+  if (!fa || !fa.transacoes || !fa.transacoes[idx]) return;
+  fa.transacoes[idx].categoria = cat;
+  salvarState(); renderMeuMes(); renderLancamentosAberta();
+}
+
+function renderLancamentosAberta() {
+  const card = document.getElementById('cardLancamentosAberta');
+  if (!card) return;
+  const fa = STATE.faturaAberta;
+  if (!fa || !fa.transacoes || !fa.transacoes.length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  const ativo = STATE.cartaoAtivo || '';
+  const box = document.getElementById('lancamentosAbertaBox');
+  const btn = document.getElementById('btnToggleAberta');
+  // guarda o índice REAL de cada transação (para editar), filtrando pelo cartão em uso
+  let itens = fa.transacoes.map((t, i) => ({ t, i })).filter(x => !ativo || x.t.cartao === ativo);
+  const totalCard = itens.reduce((s, x) => s + x.t.valor, 0);
+  const nNaoClass = itens.filter(x => !x.t.categoria || x.t.categoria === '??').length;
+  if (btn) btn.textContent = abertaExpandido ? 'Ocultar' : `Ver (${itens.length})`;
+
+  let head = `<div class="small" style="color:var(--text-soft)">${itens.length} lançamento(s) · total ${fmtBRL(totalCard)}${nNaoClass ? ` · <b style="color:var(--amber)">${nNaoClass} sem categoria</b>` : ' · <b style="color:var(--green)">tudo classificado ✓</b>'}</div>`;
+  if (!abertaExpandido) { box.innerHTML = head; return; }
+
+  head += `<div class="row" style="gap:10px;flex-wrap:wrap;margin:10px 0">
+      <label class="small">Ordenar: <select onchange="setAbertaSort(this.value)">
+        <option value="valor"${abertaSort==='valor'?' selected':''}>Maior valor</option>
+        <option value="data"${abertaSort==='data'?' selected':''}>Data</option>
+        <option value="categoria"${abertaSort==='categoria'?' selected':''}>Categoria</option>
+        <option value="descricao"${abertaSort==='descricao'?' selected':''}>Descrição</option>
+      </select></label>
+      <label class="small"><input type="checkbox" ${abertaSoNaoClass?'checked':''} onchange="toggleAbertaSoNaoClass(this.checked)" style="width:auto;vertical-align:middle"> só sem categoria</label>
+    </div>`;
+
+  let lista = abertaSoNaoClass ? itens.filter(x => !x.t.categoria || x.t.categoria === '??') : itens.slice();
+  const cmp = {
+    valor: (a, b) => b.t.valor - a.t.valor,
+    descricao: (a, b) => (a.t.estabelecimento || '').localeCompare(b.t.estabelecimento || ''),
+    categoria: (a, b) => (a.t.categoria || '??').localeCompare(b.t.categoria || '??'),
+    data: (a, b) => ordDataCurta(a.t.data) - ordDataCurta(b.t.data)
+  }[abertaSort] || ((a, b) => b.t.valor - a.t.valor);
+  lista.sort(cmp);
+
+  const cats = STATE.categorias.slice().sort();
+  const linhas = lista.map(x => {
+    const t = x.t, i = x.i;
+    const semCat = !t.categoria || t.categoria === '??';
+    return `<div class="extra-item" style="gap:8px">
+      <div class="desc">${t.estabelecimento} <span class="small">(${t.data}${t.parcela ? ' · ' + t.parcela : ''})</span></div>
+      <select onchange="setAbertaCategoria(${i}, this.value)" style="max-width:150px${semCat ? ';border-color:var(--amber)' : ''}">
+        <option value="??"${semCat ? ' selected' : ''}>??</option>
+        ${cats.map(c => `<option value="${c}"${t.categoria === c ? ' selected' : ''}>${c}</option>`).join('')}
+      </select>
+      <div class="val">${fmtBRL(t.valor)}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML = head + (linhas || '<div class="small" style="color:var(--text-dim)">Nada aqui com esse filtro.</div>');
+}
+
 function renderInicio() {
   renderMeuMes();
+  renderLancamentosAberta();
   // Selects do registro rápido
   const selCartao = document.getElementById('rrCartao');
   const cartoes = [...STATE.cartoesMichelle, 'NUBANK'];
