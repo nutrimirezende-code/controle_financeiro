@@ -468,6 +468,20 @@
 <!-- ==================== CONFIG ==================== -->
 <section id="panel-config" class="panel">
   <div class="card">
+    <h2>Meu Mês</h2>
+    <div class="desc">O "Meu Mês" acompanha o ciclo do cartão que você está usando agora.</div>
+    <div class="row" style="gap:18px;flex-wrap:wrap">
+      <label class="small">Cartão em uso (final):
+        <input type="text" id="cfgCartaoAtivo" maxlength="6" placeholder="5074" style="width:90px" onchange="setCartaoAtivo(this.value)">
+      </label>
+      <label class="small">Teto do mês (R$):
+        <input type="text" id="cfgTetoMensal" placeholder="6000" style="width:110px" onchange="setTetoMensal(this.value)">
+      </label>
+    </div>
+    <div class="small" style="color:var(--text-dim);margin-top:8px">Se digitar um cartão novo, eu já cadastro ele pra você. O teto pode ficar em branco (sem limite total).</div>
+  </div>
+
+  <div class="card">
     <h2>Cartões da Michelle</h2>
     <div class="desc">Cartões pré-marcados automaticamente ao processar novas faturas.</div>
     <div id="meusCartoes" class="cartao-list"></div>
@@ -734,7 +748,7 @@ let sortCol = 'competencia', sortDir = -1;
 // PERSISTÊNCIA — localStorage (cache rápido) + Google Sheets (nuvem)
 // ============================================================================
 function stateDefault() {
-  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], avulsas:[], acertos:[], pendentes:[], lixeira:{}, updatedAt:0 };
+  return { faturas:[], dicionario:{...DICT_INICIAL}, categorias:[...CATEGORIAS_DEFAULT], cartoesMichelle:[...CARTOES_MICHELLE_DEFAULT], orcamentos:{}, contasFixas:[], extras:[], avulsas:[], acertos:[], pendentes:[], lixeira:{}, cartaoAtivo:'', tetoMensal:0, faturaAberta:null, updatedAt:0 };
 }
 
 function normalizarEstado(s) {
@@ -750,6 +764,9 @@ function normalizarEstado(s) {
   if (!s.acertos) s.acertos = [];
   if (!s.pendentes) s.pendentes = [];
   if (!s.lixeira) s.lixeira = {};
+  if (!s.cartaoAtivo) s.cartaoAtivo = (s.cartoesMichelle && s.cartoesMichelle[0]) || '';
+  if (s.tetoMensal == null) s.tetoMensal = 0;
+  if (s.faturaAberta === undefined) s.faturaAberta = null;
   if (!s.updatedAt) s.updatedAt = 0;
   // Extras antigos sem acerto de destino: calcula pela data que foi pago
   for (const e of s.extras) {
@@ -3230,7 +3247,30 @@ function confirmarMerge() {
 // ============================================================================
 // CONFIGURAÇÕES
 // ============================================================================
+function setCartaoAtivo(v) {
+  const final = String(v || '').trim().toUpperCase();
+  if (!final) return;
+  STATE.cartaoAtivo = final;
+  // cadastra sozinho se for um cartão novo (4 dígitos e ainda não listado)
+  if (/^\d{4}$/.test(final) && !STATE.cartoesMichelle.includes(final)) {
+    lixeiraRemove('cartoesMichelle', final);
+    STATE.cartoesMichelle.push(final);
+  }
+  salvarState(); renderConfig();
+}
+
+function setTetoMensal(v) {
+  const n = parseFloat(String(v || '').replace(/\./g, '').replace(',', '.'));
+  STATE.tetoMensal = isNaN(n) || n < 0 ? 0 : n;
+  salvarState();
+}
+
 function renderConfig() {
+  const inpCart = document.getElementById('cfgCartaoAtivo');
+  if (inpCart) inpCart.value = STATE.cartaoAtivo || '';
+  const inpTeto = document.getElementById('cfgTetoMensal');
+  if (inpTeto) inpTeto.value = STATE.tetoMensal ? String(STATE.tetoMensal).replace('.', ',') : '';
+
   // Cartões
   const ec = document.getElementById('meusCartoes');
   let html = '';
