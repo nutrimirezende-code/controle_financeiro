@@ -43,6 +43,12 @@
   nav button { background: transparent; border: none; padding: 9px 16px; cursor: pointer; font-size: 13.5px; color: var(--text-soft); border-radius: 6px; transition: background .15s; font-weight: 500; font-family: inherit; white-space: nowrap; }
   nav button:hover { background: var(--bg-soft); }
   nav button.active { background: var(--accent); color: white; }
+  header { position: relative; }
+  .mais-menu { display: none; position: absolute; right: 0; top: 100%; margin-top: 2px; z-index: 100; flex-direction: column; gap: 2px; min-width: 190px; padding: 6px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  .mais-menu.show { display: flex; }
+  .mais-menu button { background: transparent; border: none; padding: 10px 14px; cursor: pointer; font-size: 13.5px; color: var(--text-soft); border-radius: 6px; text-align: left; font-family: inherit; font-weight: 500; white-space: nowrap; }
+  .mais-menu button:hover { background: var(--bg-soft); }
+  .mais-menu button.active { background: var(--accent); color: white; }
   main { max-width: 1320px; margin: 0 auto; padding: 24px; }
   .panel { display: none; }
   .panel.active { display: block; }
@@ -223,12 +229,16 @@
   </div>
   <nav>
     <button data-tab="inicio" class="active">Início</button>
-    <button data-tab="upload">Upload de Fatura</button>
-    <button data-tab="historico">Histórico</button>
+    <button data-tab="upload">Faturas</button>
+    <button data-tab="assinaturas">Assinaturas</button>
     <button data-tab="acerto">Acerto<span id="badgeAcerto" class="nav-badge" style="display:none"></span></button>
-    <button data-tab="dicionario">Dicionário</button>
-    <button data-tab="config">Configurações</button>
+    <button type="button" id="btnMais" onclick="toggleMaisMenu(event)">Mais ▾</button>
   </nav>
+  <div id="maisMenu" class="mais-menu">
+    <button data-tab="historico">Histórico e análises</button>
+    <button data-tab="dicionario">Dicionário</button>
+    <button data-tab="config">⚙️ Configurações</button>
+  </div>
 </header>
 
 <!-- TELA DE LOGIN -->
@@ -255,15 +265,6 @@
       <button class="btn sm secondary" style="margin-left:auto" onclick="document.getElementById('fileInput').click()">↻ Atualizar fatura</button>
     </div>
     <div id="meuMes"></div>
-  </div>
-
-  <div class="card" id="cardLancamentosAberta" style="display:none">
-    <div class="row" style="margin-bottom:6px;align-items:center">
-      <h2 style="margin:0">Lançamentos da fatura aberta</h2>
-      <button class="btn sm ghost" style="margin-left:auto" id="btnToggleAberta" onclick="toggleLancamentosAberta()">Ver</button>
-    </div>
-    <div class="desc">A fatura parcial que você importou. Classifique cada lançamento para o Meu Mês ficar certo. Quando a fatura fechar, isto é substituído automaticamente.</div>
-    <div id="lancamentosAbertaBox"></div>
   </div>
 
   <div class="card">
@@ -315,9 +316,38 @@
     <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx" multiple>
     <div id="uploadStatus" style="margin-top: 12px;"></div>
   </div>
+
+  <div class="card" id="cardLancamentosAberta" style="display:none">
+    <div class="row" style="margin-bottom:6px;align-items:center">
+      <h2 style="margin:0">Fatura aberta (parcial)</h2>
+      <button class="btn sm ghost" style="margin-left:auto" id="btnToggleAberta" onclick="toggleLancamentosAberta()">Ver</button>
+    </div>
+    <div class="desc">Os lançamentos da fatura parcial que você importou. Classifique cada um para o "Meu Mês" ficar certo. Quando a fatura <b>fechada</b> desse cartão entrar, esta parcial sai sozinha (é substituída).</div>
+    <div id="lancamentosAbertaBox"></div>
+  </div>
+
   <div class="card">
-    <h2>Faturas processadas</h2>
+    <h2>Faturas fechadas</h2>
     <div id="faturasList"></div>
+  </div>
+</section>
+
+<!-- ==================== ASSINATURAS ==================== -->
+<section id="panel-assinaturas" class="panel">
+  <div class="card">
+    <h2>Assinaturas (fixos do cartão)</h2>
+    <div class="desc">Cobranças automáticas que você <b>não lança à mão</b> (Netflix, Apple, Spotify, Vivo…). Elas entram sozinhas no "Meu Mês" a cada ciclo. Quando a cobrança real aparece na fatura, ela concilia (não duplica).</div>
+    <div id="assinaturasConfig"></div>
+    <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="adicionarAssinatura()">+ Adicionar assinatura</button>
+      <button class="btn ghost" onclick="puxarAssinaturasDoHistorico()">✨ Puxar do histórico</button>
+    </div>
+  </div>
+
+  <div id="assinaturasSection" class="card" style="display:none;">
+    <h2>Avisos de recorrência</h2>
+    <div class="desc">Cobranças que se repetem todo mês com valor parecido, detectadas no seu histórico. O sistema avisa quando um valor sobe, vem cobrança repetida ou uma assinatura some.</div>
+    <div id="assinaturasList"></div>
   </div>
 </section>
 
@@ -350,12 +380,6 @@
     <h2>Parcelas futuras</h2>
     <div class="desc">Compras parceladas que ainda vão cair nas próximas faturas, projetadas a partir das faturas já importadas. Toque num mês para ver o detalhe.</div>
     <div id="parcelasFuturas"></div>
-  </div>
-
-  <div id="assinaturasSection" class="card" style="display:none;">
-    <h2>Assinaturas e recorrências</h2>
-    <div class="desc">Cobranças que se repetem todo mês com valor parecido. O sistema avisa quando um valor sobe, vem cobrança repetida ou uma assinatura deixa de aparecer.</div>
-    <div id="assinaturasList"></div>
   </div>
 
   <div class="charts-grid">
@@ -522,16 +546,6 @@
     <div class="desc">Defina quanto quer gastar por mês em cada categoria — vira a meta no "Meu Mês". A coluna "Média/mês" mostra quanto você costuma gastar (do seu histórico), pra ajudar a decidir. Deixe em branco para não ter meta.</div>
     <div id="orcamentoConfig"></div>
     <button class="btn secondary" onclick="preencherOrcamentoPelaMedia()" style="margin-top: 12px;">✨ Pré-preencher pela média</button>
-  </div>
-
-  <div class="card">
-    <h2>Assinaturas (fixos do cartão)</h2>
-    <div class="desc">Cobranças automáticas que você <b>não lança à mão</b> (Netflix, Apple, Spotify, Vivo…). Elas entram sozinhas no "Meu Mês" a cada ciclo. Quando a cobrança real aparece na fatura, ela concilia (não duplica).</div>
-    <div id="assinaturasConfig"></div>
-    <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
-      <button class="btn secondary" onclick="adicionarAssinatura()">+ Adicionar assinatura</button>
-      <button class="btn ghost" onclick="puxarAssinaturasDoHistorico()">✨ Puxar do histórico</button>
-    </div>
   </div>
 
   <div class="card">
@@ -977,15 +991,16 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', flushSyncPendente);
 
 function renderAbaAtiva() {
-  const ativa = document.querySelector('nav button.active');
+  const ativa = document.querySelector('nav button[data-tab].active, #maisMenu button[data-tab].active');
   if (!ativa) return;
   const tab = ativa.dataset.tab;
   if (tab === 'inicio') renderInicio();
+  else if (tab === 'assinaturas') renderAssinaturasTab();
   else if (tab === 'historico') renderHistorico();
   else if (tab === 'acerto') renderAcerto();
   else if (tab === 'dicionario') renderDicionario();
   else if (tab === 'config') renderConfig();
-  else if (tab === 'upload') renderFaturasList();
+  else if (tab === 'upload') { renderFaturasList(); renderLancamentosAberta(); }
 }
 
 // Mescla o estado local com o da nuvem sem perder nada de nenhum dos lados.
@@ -1364,25 +1379,44 @@ function compKey(comp) {
 // ============================================================================
 // NAVEGAÇÃO
 // ============================================================================
-document.querySelectorAll('nav button').forEach(btn => {
+document.querySelectorAll('nav button[data-tab], #maisMenu button[data-tab]').forEach(btn => {
   btn.onclick = () => {
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('nav button, #maisMenu button').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'inicio') renderInicio();
-    if (btn.dataset.tab === 'historico') renderHistorico();
-    if (btn.dataset.tab === 'acerto') renderAcerto();
-    if (btn.dataset.tab === 'dicionario') renderDicionario();
-    if (btn.dataset.tab === 'config') renderConfig();
+    const tab = btn.dataset.tab;
+    document.getElementById('panel-' + tab).classList.add('active');
+    const maisMenu = document.getElementById('maisMenu');
+    // item vindo do menu "Mais": destaca o botão Mais e fecha o menu
+    if (btn.closest('#maisMenu')) document.getElementById('btnMais').classList.add('active');
+    if (maisMenu) maisMenu.classList.remove('show');
+    if (tab === 'inicio') renderInicio();
+    if (tab === 'upload') renderLancamentosAberta();
+    if (tab === 'assinaturas') renderAssinaturasTab();
+    if (tab === 'historico') renderHistorico();
+    if (tab === 'acerto') renderAcerto();
+    if (tab === 'dicionario') renderDicionario();
+    if (tab === 'config') renderConfig();
   };
+});
+
+function toggleMaisMenu(e) {
+  if (e) e.stopPropagation();
+  const m = document.getElementById('maisMenu');
+  if (m) m.classList.toggle('show');
+}
+document.addEventListener('click', (e) => {
+  const btnMais = document.getElementById('btnMais'), m = document.getElementById('maisMenu');
+  if (!m || !m.classList.contains('show')) return;
+  if (e.target === btnMais || m.contains(e.target)) return;
+  m.classList.remove('show');
 });
 
 function abrirModal(id) { document.getElementById(id).classList.add('show'); }
 function fecharModal(id) { document.getElementById(id).classList.remove('show'); }
 
 function irParaAba(tab) {
-  const btn = document.querySelector(`nav button[data-tab="${tab}"]`);
+  const btn = document.querySelector(`nav button[data-tab="${tab}"], #maisMenu button[data-tab="${tab}"]`);
   if (btn) btn.click();
 }
 
@@ -1747,7 +1781,6 @@ function setAbertaObs(idx, val) {
 
 function renderInicio() {
   renderMeuMes();
-  renderLancamentosAberta();
   // Selects do registro rápido
   const selCartao = document.getElementById('rrCartao');
   const cartoes = [...STATE.cartoesMichelle, 'NUBANK'];
@@ -2520,8 +2553,9 @@ function salvarFatura() {
     fecharModal('modalClassificar');
     const totA = FATURA_TEMP.transacoes.reduce((s,t)=>s+t.valor,0);
     FATURA_TEMP = null;
-    document.getElementById('uploadStatus').innerHTML = `<div class="alert success">✓ Fatura aberta atualizada! ${fmtBRL(totA)} — veja no "Meu Mês".</div>`;
+    document.getElementById('uploadStatus').innerHTML = `<div class="alert success">✓ Fatura aberta atualizada! ${fmtBRL(totA)} — veja os lançamentos abaixo e no "Meu Mês".</div>`;
     renderInicio();
+    renderLancamentosAberta();
     finalizarFluxoFatura();
     return;
   }
@@ -2714,7 +2748,6 @@ function renderHistorico() {
 
   try { renderDestaques(); } catch(e) { console.warn('Destaques erro:', e); }
   try { renderParcelasFuturas(); } catch(e) { console.warn('Parcelas erro:', e); }
-  try { renderAssinaturas(); } catch(e) { console.warn('Assinaturas erro:', e); }
   try { renderCharts(transComComp, comps, cats); } catch(e) { console.warn('Charts não carregou:', e); }
   try { renderComparativo(transComComp, comps, cats); } catch(e) { console.warn('Comparativo erro:', e); }
   try { renderPivot(transComComp, comps, cats); } catch(e) { console.warn('Pivot erro:', e); }
@@ -3660,8 +3693,13 @@ function renderConfig() {
 
   // Orçamento
   renderOrcamentoConfig();
-  renderAssinaturasConfig();
   atualizarStorageInfo();
+}
+
+// Aba Assinaturas: cadastro editável + avisos de recorrência detectados
+function renderAssinaturasTab() {
+  renderAssinaturasConfig();
+  try { renderAssinaturas(); } catch(e) { console.warn('Assinaturas (avisos) erro:', e); }
 }
 
 // Modal add cartão
