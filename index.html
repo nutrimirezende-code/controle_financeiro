@@ -1434,9 +1434,23 @@ function hojeISO() {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+// Converte um valor digitado (pt-BR) em número, aceitando vírgula OU ponto decimal:
+// "55,90"→55.9, "21.90"→21.9, "1.234,56"→1234.56, "1.500"→1500, "R$ 10"→10, ""→NaN.
+// Regra: se tem vírgula, ela é o decimal e os pontos são milhar; sem vírgula, um único
+// ponto seguido de 1–2 dígitos é decimal (21.90), senão os pontos são milhar (1.500).
+function parseValorBR(v) {
+  let s = String(v == null ? '' : v).replace(/R\$\s*/i, '').replace(/\s+/g, '');
+  if (!s) return NaN;
+  if (s.indexOf(',') >= 0) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (!/\.\d{1,2}$/.test(s) || (s.match(/\./g) || []).length > 1) {
+    s = s.replace(/\./g, '');
+  }
+  return parseFloat(s);
+}
+
 function lerRegistroRapido() {
-  const valorStr = document.getElementById('rrValor').value.replace(/R\$\s*/i,'').trim();
-  const valor = parseFloat(valorStr.replace(/\./g,'').replace(',','.'));
+  const valor = parseValorBR(document.getElementById('rrValor').value);
   const desc = document.getElementById('rrDesc').value.trim();
   // data escolhida (padrão hoje); converte AAAA-MM-DD → DD/MM/AAAA
   let data = hojeBR();
@@ -1550,25 +1564,38 @@ function computeMeuMes() {
     if (ativo && a.cartao && a.cartao !== ativo) continue;
     const av = a.valor || 0;
     let ja = false;
-    // (1) já postou na fatura aberta? Mesmo sinal (não casa com estorno negativo);
-    // nome forte (>=2) OU nome fraco (>=1) com valor quase idêntico.
+    // (1) já postou na fatura aberta? Escolhe o MELHOR candidato (não o primeiro),
+    // do mesmo sinal. Aceita: nome idêntico (3) com qualquer valor (cobre reajuste);
+    // nome parecido/substring (2) só com valor perto (±15%/±R$1 — impede apelido
+    // genérico "AMAZON" roubar a linha errada); nome fraco (1) só com valor quase igual.
+    let melhorI = -1, melhorScore = -1;
     for (let i = 0; i < abertaTrans.length; i++) {
       if (usadasAss.has(i)) continue;
       const t = abertaTrans[i];
       if ((t.valor < 0) !== (av < 0)) continue;
-      // casa pelo apelido (como aparece na fatura) OU pela descrição
       const sim = Math.max(
         similaridadeEstab(a.descricao, t.estabelecimento),
         a.apelidoFatura ? similaridadeEstab(a.apelidoFatura, t.estabelecimento) : 0
       );
-      if (sim >= 2 || (sim >= 1 && Math.abs(t.valor - av) <= 0.10)) { usadasAss.add(i); ja = true; break; }
+      if (sim < 1) continue;
+      const dv = Math.abs(t.valor - av);
+      const aceita = sim >= 3 || (sim >= 2 && dv <= Math.max(av * 0.15, 1)) || (sim >= 1 && dv <= 0.10);
+      if (!aceita) continue;
+      const score = sim * 1000 - dv; // nome forte primeiro; desempata pelo valor mais próximo
+      if (score > melhorScore) { melhorScore = score; melhorI = i; }
     }
-    // (2) ou ela já anotou à mão? Casa por nome forte (independe do valor, cobre
-    // mudança de preço), consumindo 1-para-1 (2 assinaturas iguais ≠ 1 anotação).
+    if (melhorI >= 0) { usadasAss.add(melhorI); ja = true; }
+    // (2) ou ela já anotou à mão? Casa por nome forte (descrição OU apelido),
+    // consumindo 1-para-1 (2 assinaturas iguais ≠ 1 anotação).
     if (!ja) {
       for (let j = 0; j < pendentesNaoPostados.length; j++) {
         if (usadasPend.has(j)) continue;
-        if (similaridadeEstab(a.descricao, pendentesNaoPostados[j].estabelecimento) >= 2) { usadasPend.add(j); ja = true; break; }
+        const est = pendentesNaoPostados[j].estabelecimento;
+        const simP = Math.max(
+          similaridadeEstab(a.descricao, est),
+          a.apelidoFatura ? similaridadeEstab(a.apelidoFatura, est) : 0
+        );
+        if (simP >= 2) { usadasPend.add(j); ja = true; break; }
       }
     }
     if (!ja) provisionadas.push(a);
@@ -1735,7 +1762,7 @@ function renderMeuMes() {
     const pct = c.limite > 0 ? `${Math.round(c.gasto/c.limite*100)}%${estourou?' — passou!':''}` : '';
     const rodape = [pct, detalhe].filter(Boolean).join(' · ');
     const exp = meuMesExpandido.has(c.cat);
-    const catAttr = c.cat.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const catAttr = c.cat.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     html += `<div class="budget-item" onclick="toggleCategoriaDetalhe('${catAttr}')" style="cursor:pointer">
       <div class="bud-header">
         <span class="bud-cat">${exp ? '▾' : '▸'} ${c.cat}</span>
@@ -2477,7 +2504,7 @@ function confirmarTransManual() {
   const estab = document.getElementById('tmEstab').value.trim();
   if (!estab) { alert('Informe o estabelecimento.'); return; }
   const valorStr = document.getElementById('tmValor').value.trim();
-  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  const valor = parseValorBR(valorStr);
   if (isNaN(valor)) { alert('Valor inválido.'); return; }
   const cartao = document.getElementById('tmCartao').value;
   const categoria = document.getElementById('tmCategoria').value;
@@ -3722,7 +3749,7 @@ function usarCartaoNovo() {
 }
 
 function setTetoMensal(v) {
-  const n = parseFloat(String(v || '').replace(/\./g, '').replace(',', '.'));
+  const n = parseValorBR(v);
   STATE.tetoMensal = isNaN(n) || n < 0 ? 0 : n;
   salvarState();
 }
@@ -3855,7 +3882,7 @@ function preencherOrcamentoPelaMedia() {
 function setOrcamento(cat, val) {
   const v = String(val == null ? '' : val).trim();
   if (v === '') { removeOrcamento(cat); return; }
-  const n = parseFloat(v.replace(/\./g, '').replace(',', '.'));
+  const n = parseValorBR(v);
   if (isNaN(n) || n < 0) return;
   lixeiraRemove('orcamentos', cat);
   STATE.orcamentos[cat] = n;
@@ -3933,7 +3960,7 @@ function setAssinaturaCampo(id, campo, valor) {
   const a = (STATE.assinaturas || []).find(x => x.id === id);
   if (!a) return;
   if (campo === 'valor') {
-    const n = parseFloat(String(valor || '').replace(/\./g, '').replace(',', '.'));
+    const n = parseValorBR(valor);
     a.valor = isNaN(n) || n < 0 ? 0 : n;
   } else {
     a[campo] = String(valor == null ? '' : valor).trim();
@@ -4131,7 +4158,7 @@ function salvarContaFixa() {
   const descricao = document.getElementById('cfDescricao').value.trim();
   if (!descricao) { alert('Informe a descrição.'); return; }
   const valorStr = document.getElementById('cfValor').value.trim();
-  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  const valor = parseValorBR(valorStr);
   if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
   const dia = parseInt(document.getElementById('cfDia').value);
   if (isNaN(dia) || dia < 1 || dia > 31) { alert('Dia inválido (1-31).'); return; }
@@ -4210,7 +4237,7 @@ function addContaAvulsa() {
 function salvarContaAvulsa() {
   const desc = document.getElementById('avDescricao').value.trim();
   if (!desc) { alert('Informe a descrição.'); return; }
-  const val = parseFloat(document.getElementById('avValor').value.replace(/\./g,'').replace(',','.'));
+  const val = parseValorBR(document.getElementById('avValor').value);
   if (isNaN(val) || val <= 0) { alert('Valor inválido.'); return; }
   const mes = document.getElementById('acertoMes').value;
   const periodo = document.getElementById('acertoPeriodo').value;
@@ -4315,7 +4342,7 @@ function lerContasDoFormulario() {
     const cb = document.getElementById('acb_' + c.id);
     const input = document.getElementById('acv_' + c.id);
     if (!cb || !cb.checked) continue; // sem checkbox no DOM ou desmarcada: fora da mensagem
-    const val = parseFloat((input?.value || '0').replace(/\./g,'').replace(',','.'));
+    const val = parseValorBR(input?.value || '0');
     contas.push({ descricao: c.descricao, valor: isNaN(val) ? c.valor : val, dia: c.dia, avulsa: c.tipo === 'avulsa' });
     if (c.tipo === 'avulsa') avulsaIdsIncluidas.push(c.id);
   }
@@ -4381,7 +4408,7 @@ function salvarExtra() {
   const descricao = document.getElementById('exDescricao').value.trim();
   if (!descricao) { alert('Informe a descrição.'); return; }
   const valorStr = document.getElementById('exValor').value.trim();
-  const valor = parseFloat(valorStr.replace(/\./g, '').replace(',', '.'));
+  const valor = parseValorBR(valorStr);
   if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
   const data = document.getElementById('exData').value.trim();
   if (!data) { alert('Informe a data.'); return; }
