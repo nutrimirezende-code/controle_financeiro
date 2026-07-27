@@ -1628,7 +1628,7 @@ function renderMeuMes() {
   if (m.totalManual > 0)     leg.push(`<span class="row" style="gap:5px;align-items:center">${dot(COR_MANUAL)}${fmtBRL(m.totalManual)} a confirmar</span>`);
   if (m.totalAssinatura > 0) leg.push(`<span class="row" style="gap:5px;align-items:center">${dot(COR_ASSIN)}${fmtBRL(m.totalAssinatura)} assinaturas</span>`);
   if (m.totalManual > 0 || m.totalAssinatura > 0) {
-    html += `<div class="row" style="gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--text-soft);margin:-6px 0 16px">${leg.join('')}</div>`;
+    html += `<div class="row" style="gap:14px;row-gap:4px;flex-wrap:wrap;font-size:11.5px;color:var(--text-soft);margin-top:10px">${leg.join('')}</div>`;
   }
   html += `</div>`;
 
@@ -1720,16 +1720,29 @@ function renderLancamentosAberta() {
   const linhas = lista.map(x => {
     const t = x.t, i = x.i;
     const semCat = !t.categoria || t.categoria === '??';
-    return `<div class="extra-item" style="gap:8px">
-      <div class="desc">${t.estabelecimento} <span class="small">(${t.data}${t.parcela ? ' · ' + t.parcela : ''})</span></div>
-      <select onchange="setAbertaCategoria(${i}, this.value)" style="max-width:150px${semCat ? ';border-color:var(--amber)' : ''}">
-        <option value="??"${semCat ? ' selected' : ''}>??</option>
-        ${cats.map(c => `<option value="${c}"${t.categoria === c ? ' selected' : ''}>${c}</option>`).join('')}
-      </select>
-      <div class="val">${fmtBRL(t.valor)}</div>
+    const obs = (t.obs || '').replace(/"/g, '&quot;');
+    return `<div style="padding:9px 0;border-bottom:1px solid var(--border)">
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:baseline">
+        <div class="desc">${t.estabelecimento} <span class="small" style="color:var(--text-dim)">(${t.data}${t.parcela ? ' · ' + t.parcela : ''})</span></div>
+        <div class="val" style="font-weight:600;${t.valor < 0 ? 'color:var(--red)' : ''}">${fmtBRL(t.valor)}</div>
+      </div>
+      <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">
+        <select onchange="setAbertaCategoria(${i}, this.value)" style="max-width:150px${semCat ? ';border-color:var(--amber)' : ''}">
+          <option value="??"${semCat ? ' selected' : ''}>??</option>
+          ${cats.map(c => `<option value="${c}"${t.categoria === c ? ' selected' : ''}>${c}</option>`).join('')}
+        </select>
+        <input type="text" value="${obs}" placeholder="observação (opcional)" onchange="setAbertaObs(${i}, this.value)" style="flex:1;min-width:130px">
+      </div>
     </div>`;
   }).join('');
   box.innerHTML = head + (linhas || '<div class="small" style="color:var(--text-dim)">Nada aqui com esse filtro.</div>');
+}
+
+function setAbertaObs(idx, val) {
+  const fa = STATE.faturaAberta;
+  if (!fa || !fa.transacoes || !fa.transacoes[idx]) return;
+  fa.transacoes[idx].obs = String(val || '').trim();
+  salvarState(); // não re-renderiza: não muda totais nem ordem, e evita perder o foco
 }
 
 function renderInicio() {
