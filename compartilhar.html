@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lançamentos — Controle de Cartões</title>
+<style>
+  :root {
+    --bg: #FAF8F5; --bg-card: #FFFFFF; --bg-soft: #F2EDE5;
+    --border: #E5DDD0; --text: #2A2520; --text-soft: #6B5F52; --text-dim: #9A8E7F;
+    --accent: #8B1A1A; --red: #A03030; --green: #4A6F4F;
+    --shadow: 0 1px 3px rgba(60,40,20,0.06), 0 4px 12px rgba(60,40,20,0.04);
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background: var(--bg); color: var(--text); margin: 0; font-size: 14px; line-height: 1.5; }
+  header { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 14px 24px; box-shadow: var(--shadow); }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  header .sub { font-size: 12px; color: var(--text-soft); margin-top: 2px; }
+  main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; padding: 12px; background: var(--bg-soft); border-radius: 8px; border: 1px solid var(--border); }
+  .filters label { font-size: 12.5px; color: var(--text-soft); display: flex; align-items: center; gap: 6px; }
+  select, input[type="text"] { padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; font-size: 13px; background: var(--bg-card); font-family: inherit; color: var(--text); }
+  .stats { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; box-shadow: var(--shadow); }
+  .stat .label { font-size: 11px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.4px; }
+  .stat .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+  .table-wrap { overflow-x: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg-soft); font-weight: 600; font-size: 12px; color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.4px; cursor: pointer; user-select: none; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+  th:hover { background: var(--border); }
+  tbody tr:hover { background: #FFF7F5; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { background: var(--bg-soft); font-weight: 600; border-top: 2px solid var(--border); border-bottom: none; }
+  .empty { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .badge-cat { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: var(--bg-soft); color: var(--text-soft); border: 1px solid var(--border); }
+  .obs-cell { color: var(--text-soft); font-style: italic; }
+  #pivotTable th:first-child, #pivotTable td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; text-align: left; }
+  #pivotTable th:first-child { background: var(--bg-soft); z-index: 3; }
+  #pivotTable tfoot td:first-child { background: var(--bg-soft); }
+  #pivotTable tbody tr:hover td:first-child { background: #FFF7F5; }
+  .loading { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 15px; }
+  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 8px; }
+  .action-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .btn { background: var(--accent); color: white; border: none; padding: 9px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; font-family: inherit; }
+  .btn:hover { filter: brightness(0.85); }
+  .btn.secondary { background: var(--bg-soft); color: var(--text); border: 1px solid var(--border); }
+  .btn.secondary:hover { background: var(--border); }
+  .btn.green { background: #25D366; color: white; }
+  .btn.green:hover { filter: brightness(0.9); }
+  @media print {
+    header .sub, .action-bar, .filters, .stats { display: none !important; }
+    body { background: white; font-size: 11px; }
+    header { box-shadow: none; border-bottom: 2px solid #333; padding: 10px 16px; }
+    header h1 { font-size: 14px; }
+    main { padding: 12px; max-width: 100%; }
+    .table-wrap { border: none; box-shadow: none; overflow: visible; }
+    table { font-size: 11px; }
+    th, td { padding: 5px 8px; }
+    th { background: #eee !important; color: #333 !important; }
+    tbody tr:hover { background: transparent !important; }
+    tfoot td { background: #eee !important; }
+    .badge-cat { background: transparent; border: 1px solid #999; padding: 1px 4px; }
+    .print-info { display: block !important; font-size: 10px; color: #666; margin-top: 8px; }
+  }
+  .print-info { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 768px) { main { padding: 14px; } header { padding: 12px 16px; } .filters { flex-direction: column; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lançamentos · <span>Controle de Cartões</span></h1>
+  <div class="sub" id="headerSub">Carregando dados...</div>
+</header>
+<main>
+  <div class="filters" id="filtros" style="display:none">
+    <label>Vencimento: <select id="fVenc" onchange="render()"><option value="">Todos</option></select></label>
+    <label>Competência: <select id="fComp" onchange="render()"><option value="">Todas</option></select></label>
+    <label>Categoria: <select id="fCat" onchange="render()"><option value="">Todas</option></select></label>
+    <label>Cartão: <select id="fCart" onchange="render()"><option value="">Todos</option></select></label>
+    <label>Buscar: <input type="text" id="fTxt" placeholder="estabelecimento..." oninput="render()"></label>
+  </div>
+  <div class="action-bar" id="actionBar" style="display:none">
+    <button class="btn" id="btnResumo" onclick="setModo('resumo')">📊 Resumo</button>
+    <button class="btn secondary" id="btnDetalhar" onclick="setModo('detalhar')">📋 Detalhar</button>
+    <button class="btn secondary" onclick="imprimirOuPDF()" style="margin-left:auto">🖨️ Imprimir / Salvar PDF</button>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="table-wrap" id="detailWrap">
+    <div class="loading" id="loading"><span class="spinner"></span>Buscando lançamentos...</div>
+    <table id="tabela" style="display:none">
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+      <tfoot><tr id="tfoot"></tr></tfoot>
+    </table>
+  </div>
+  <div class="table-wrap" id="pivotWrap" style="display:none">
+    <table id="pivotTable">
+      <thead><tr id="pivotThead"></tr></thead>
+      <tbody id="pivotTbody"></tbody>
+      <tfoot><tr id="pivotTfoot"></tr></tfoot>
+    </table>
+  </div>
+</main>
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwkh0oWPmJE6JbksGgnNJxX6_Y7GTUDeGPlR0xYwQ7vpmHMu7R3LFV2t3_fcErigJFc/exec';
+const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+const COLS = [
+  { key: 'venc',            label: 'Vencimento' },
+  { key: 'competencia',     label: 'Compet.'    },
+  { key: 'data',            label: 'Data'       },
+  { key: 'cartao',          label: 'Cartão'     },
+  { key: 'estabelecimento', label: 'Estabelecimento' },
+  { key: 'categoria',       label: 'Categoria'  },
+  { key: 'valor',           label: 'Valor', num: true },
+  { key: 'obs',             label: 'Observação' },
+];
+
+let dados = [];
+let sortCol = 'venc', sortDir = -1;
+
+function fmtBRL(v) { return v.toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
+function compKey(c) {
+  if (!c) return '';
+  const p = c.split('/');
+  return p[1] + String(MESES.indexOf(p[0])+1).padStart(2,'0');
+}
+function vencParaCompetencia(venc) {
+  if (!venc) return null;
+  const p = venc.split('/');
+  if (p.length < 3) return null;
+  let m = parseInt(p[1]) - 1;
+  let a = parseInt(p[2]);
+  if (m < 1) { m = 12; a--; }
+  return MESES[m-1] + '/' + a;
+}
+
+function sortIcon(col) {
+  if (sortCol !== col) return '<span style="opacity:.3;font-size:10px">⇅</span>';
+  return sortDir === 1 ? '<span style="font-size:10px">▲</span>' : '<span style="font-size:10px">▼</span>';
+}
+function setSortCol(col) {
+  if (sortCol === col) sortDir *= -1;
+  else { sortCol = col; sortDir = col === 'valor' ? -1 : 1; }
+  render();
+}
+
+function populate() {
+  const vencs = [...new Set(dados.map(t=>t.venc).filter(Boolean))].sort((a,b)=>a.split('/').reverse().join('').localeCompare(b.split('/').reverse().join('')));
+  const comps = [...new Set(dados.map(t=>t.competencia).filter(Boolean))].sort((a,b)=>compKey(a).localeCompare(compKey(b)));
+  const cats  = [...new Set(dados.map(t=>t.categoria).filter(Boolean))].sort();
+  const carts = [...new Set(dados.map(t=>t.cartao).filter(Boolean))].sort();
+  document.getElementById('fVenc').innerHTML = '<option value="">Todos</option>' + vencs.map(v=>`<option value="${v}">${v}</option>`).join('');
+  document.getElementById('fComp').innerHTML = '<option value="">Todas</option>' + comps.map(c=>`<option value="${c}">${c}</option>`).join('');
+  document.getElementById('fCat').innerHTML  = '<option value="">Todas</option>' + cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  document.getElementById('fCart').innerHTML = '<option value="">Todos</option>' + carts.map(c=>`<option value="${c}">final ${c}</option>`).join('');
+}
+
+let modo = 'resumo';
+
+function filtrarRows() {
+  const fV   = document.getElementById('fVenc').value;
+  const fC   = document.getElementById('fComp').value;
+  const fCat = document.getElementById('fCat').value;
+  const fCart= document.getElementById('fCart').value;
+  const fTxt = document.getElementById('fTxt').value.toUpperCase();
+  return dados.filter(t =>
+    (!fV    || t.venc        === fV)   &&
+    (!fC    || t.competencia === fC)   &&
+    (!fCat  || t.categoria   === fCat) &&
+    (!fCart || t.cartao      === fCart)&&
+    (!fTxt  || (t.estabelecimento||'').toUpperCase().includes(fTxt))
+  );
+}
+
+function setModo(m) {
+  modo = m;
+  document.getElementById('btnResumo').className   = 'btn' + (m==='resumo'   ? '' : ' secondary');
+  document.getElementById('btnDetalhar').className = 'btn' + (m==='detalhar' ? '' : ' secondary');
+  render();
+}
+
+function render() {
+  const rows = filtrarRows();
+  const total = rows.reduce((s,t)=>s+t.valor, 0);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="label">Lançamentos</div><div class="value">${rows.length}</div></div>
+    <div class="stat"><div class="label">Total</div><div class="value" style="color:var(--accent)">${fmtBRL(total)}</div></div>`;
+  const ehResumo = modo === 'resumo';
+  document.getElementById('detailWrap').style.display = ehResumo ? 'none' : 'block';
+  document.getElementById('pivotWrap').style.display  = ehResumo ? 'block' : 'none';
+  if (ehResumo) renderResumo(rows); else renderDetalhar(rows);
+}
+
+// Detalhar: a lista de lançamentos com ordenação (como antes)
+function renderDetalhar(rows) {
+  rows = rows.slice().sort((a, b) => {
+    let va, vb;
+    if      (sortCol==='venc')        { va=(a.venc||'').split('/').reverse().join(''); vb=(b.venc||'').split('/').reverse().join(''); }
+    else if (sortCol==='competencia') { va=compKey(a.competencia); vb=compKey(b.competencia); }
+    else if (sortCol==='valor')       { return (a.valor-b.valor)*sortDir; }
+    else                              { va=a[sortCol]||''; vb=b[sortCol]||''; }
+    return va.localeCompare(vb)*sortDir;
+  });
+
+  document.getElementById('thead').innerHTML = COLS.map(c =>
+    `<th class="${c.num?'num':''}" onclick="setSortCol('${c.key}')">${c.label} ${sortIcon(c.key)}</th>`
+  ).join('');
+
+  if (!rows.length) {
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="${COLS.length}" class="empty">Nenhum lançamento encontrado.</td></tr>`;
+  } else {
+    document.getElementById('tbody').innerHTML = rows.map(t => `<tr>
+      <td>${t.venc||'-'}</td>
+      <td><small>${t.competencia||'-'}</small></td>
+      <td>${t.data||''}</td>
+      <td><small>final ${t.cartao||''}</small></td>
+      <td>${t.estabelecimento||''}${t.parcela?` <small style="color:#9A8E7F">(${t.parcela})</small>`:''}</td>
+      <td><span class="badge-cat">${t.categoria||'?'}</span></td>
+      <td class="num" style="${t.valor<0?'color:var(--red)':''}">${fmtBRL(t.valor)}</td>
+      <td class="obs-cell">${t.obs||'<span style="opacity:.3">—</span>'}</td>
+    </tr>`).join('');
+  }
+
+  const total = rows.reduce((s,t)=>s+t.valor, 0);
+  document.getElementById('tfoot').innerHTML =
+    `<td colspan="${COLS.length-1}">${rows.length} lançamentos</td><td class="num">${fmtBRL(total)}</td>`;
+}
+
+// Resumo: tabela categoria (linhas) × competências (colunas), com totais
+function renderResumo(rows) {
+  const comps = [...new Set(rows.map(t=>t.competencia).filter(Boolean))].sort((a,b)=>compKey(a).localeCompare(compKey(b)));
+  const mat = {}, totCat = {}, totComp = {}; let totGeral = 0;
+  for (const t of rows) {
+    const cat = t.categoria || '?';
+    const comp = t.competencia || '—';
+    (mat[cat] || (mat[cat] = {}))[comp] = (mat[cat][comp] || 0) + t.valor;
+    totCat[cat]   = (totCat[cat]   || 0) + t.valor;
+    totComp[comp] = (totComp[comp] || 0) + t.valor;
+    totGeral += t.valor;
+  }
+  const catsOrd = Object.keys(mat).sort((a,b)=>(totCat[b]||0)-(totCat[a]||0));
+  const compsExib = [...comps];
+  if (totComp['—']) compsExib.push('—'); // competência desconhecida no fim, se houver
+
+  if (!catsOrd.length) {
+    document.getElementById('pivotThead').innerHTML = '<th>Categoria</th>';
+    document.getElementById('pivotTbody').innerHTML = `<tr><td class="empty">Nenhum lançamento encontrado.</td></tr>`;
+    document.getElementById('pivotTfoot').innerHTML = '';
+    return;
+  }
+
+  document.getElementById('pivotThead').innerHTML =
+    '<th>Categoria</th>' + compsExib.map(c=>`<th class="num">${c}</th>`).join('') + '<th class="num">Total</th>';
+
+  document.getElementById('pivotTbody').innerHTML = catsOrd.map(cat => {
+    const cells = compsExib.map(c => {
+      const v = mat[cat][c];
+      return `<td class="num">${v ? fmtBRL(v) : '<span style="opacity:.25">–</span>'}</td>`;
+    }).join('');
+    return `<tr><td><span class="badge-cat">${cat}</span></td>${cells}<td class="num"><b>${fmtBRL(totCat[cat])}</b></td></tr>`;
+  }).join('');
+
+  document.getElementById('pivotTfoot').innerHTML =
+    '<td><b>Total</b></td>' + compsExib.map(c=>`<td class="num"><b>${fmtBRL(totComp[c]||0)}</b></td>`).join('') +
+    `<td class="num"><b>${fmtBRL(totGeral)}</b></td>`;
+}
+
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const shareTok = params.get('t');
+  const sessao = params.get('s');
+  let fetchUrl = null;
+  if (shareTok) {
+    // Link novo: token permanente somente-leitura
+    fetchUrl = `${SCRIPT_URL}?action=shared&t=${encodeURIComponent(shareTok)}`;
+  } else if (sessao) {
+    // Link antigo (compatibilidade): token de sessão
+    fetchUrl = `${SCRIPT_URL}?action=load&sessao=${encodeURIComponent(sessao)}`;
+  } else {
+    document.getElementById('loading').innerHTML = 'Link inválido. Peça um novo link para Michelle.';
+    return;
+  }
+  try {
+    const resp = await fetch(fetchUrl, { redirect: 'follow' });
+    const r = await resp.json();
+    if (!r.ok || !r.dados || !r.dados.faturas) {
+      document.getElementById('loading').innerHTML = 'Não foi possível carregar os dados. Peça um link atualizado.';
+      return;
+    }
+    // Achatar todas as transações
+    for (const f of r.dados.faturas)
+      for (const t of f.transacoes)
+        dados.push({...t, venc: f.venc, faturaArquivo: f.arquivo, competencia: vencParaCompetencia(f.venc)});
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('tabela').style.display = 'table';
+    document.getElementById('filtros').style.display = 'flex';
+    document.getElementById('actionBar').style.display = 'flex';
+    document.getElementById('headerSub').textContent = `${dados.length} lançamentos no total`;
+    populate();
+    render();
+  } catch(e) {
+    document.getElementById('loading').innerHTML = 'Erro ao carregar. Verifique sua conexão.';
+  }
+}
+
+function imprimirOuPDF() {
+  window.print();
+}
+
+function enviarWhatsApp() {
+  const fV   = document.getElementById('fVenc').value;
+  const fC   = document.getElementById('fComp').value;
+  const fCat = document.getElementById('fCat').value;
+  const fCart= document.getElementById('fCart').value;
+  const fTxt = document.getElementById('fTxt').value.toUpperCase();
+
+  let rows = dados.filter(t =>
+    (!fV    || t.venc        === fV)   &&
+    (!fC    || t.competencia === fC)   &&
+    (!fCat  || t.categoria   === fCat) &&
+    (!fCart || t.cartao      === fCart)&&
+    (!fTxt  || (t.estabelecimento||'').toUpperCase().includes(fTxt))
+  );
+
+  if (!rows.length) { alert('Nenhum lançamento selecionado nos filtros.'); return; }
+
+  const total = rows.reduce((s,t) => s+t.valor, 0);
+
+  // Agrupa por categoria para resumo
+  const porCat = {};
+  rows.forEach(t => { porCat[t.categoria] = (porCat[t.categoria]||0) + t.valor; });
+  const resumoCat = Object.entries(porCat)
+    .sort((a,b) => b[1]-a[1])
+    .map(([c,v]) => `• ${c}: ${fmtBRL(v)}`)
+    .join('\n');
+
+  // Filtros ativos para contexto
+  const filtros = [fV&&`Venc: ${fV}`, fC&&`Compet: ${fC}`, fCat&&`Cat: ${fCat}`, fCart&&`Cartão: final ${fCart}`].filter(Boolean);
+  const filtrosTxt = filtros.length ? `\nFiltros: ${filtros.join(' | ')}` : '';
+
+  const msg = `*Lançamentos — Controle de Cartões*${filtrosTxt}\n\n${resumoCat}\n\n*Total: ${fmtBRL(total)}*\n(${rows.length} lançamentos)\n\nVer detalhes: ${location.href}`;
+
+  if (navigator.share) {
+    navigator.share({ title: 'Lançamentos', text: msg }).catch(() => {});
+  } else {
+    window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
