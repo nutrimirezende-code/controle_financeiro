@@ -93,7 +93,13 @@ funciona para imagem (não tem cabeçalho) e é ambíguo.
 - A tela de conferência da **parcial** passa a permitir **corrigir valor e
   descrição** por linha (além de categoria/cartão/excluir), porque o OCR pode
   errar. É a rede de segurança.
-- Ordenação já pedida anteriormente permanece.
+- **Destaque de baixa confiança:** o Tesseract devolve um grau de confiança por
+  palavra. Linhas cujo **valor** (ou nome) foi lido com confiança baixa (ex.:
+  abaixo de ~75) ficam **marcadas em amarelo** na conferência, com um aviso
+  ("⚠ confira") — para a Michelle revisar essas primeiro. Só se aplica à
+  importação por **imagem** (Excel/PDF vêm confiáveis, sem marcação).
+- Ordenação já pedida anteriormente permanece; opção de ordenar/filtrar pelas
+  linhas "a conferir" (baixa confiança) primeiro.
 
 ## Conciliação visível na fatura fechada
 
@@ -120,4 +126,6 @@ funciona para imagem (não tem cabeçalho) e é ambíguo.
 
 - Sem coleção nova. `STATE.faturaAberta` já existe.
 - `parseItauImagem` produz a mesma forma de transação dos outros parsers.
-- Transação de imagem carrega `origem: 'imagem'` (opcional) só para rótulo/aviso.
+- Transação de imagem carrega, apenas durante a conferência, `origem: 'imagem'`
+  e `confianca` (0–100, do OCR) para o destaque de baixa confiança. Esses campos
+  são só de conferência — não precisam ir para o estado salvo.
