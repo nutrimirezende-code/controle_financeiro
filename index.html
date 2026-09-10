@@ -543,6 +543,14 @@
   </div>
 
   <div class="card">
+    <h2>Trocar classificação (remapear)</h2>
+    <div class="desc">Mudou as categorias? Diga pra onde cada categoria antiga vai (De→Para) e o sistema aplica em <b>todo o histórico</b> de uma vez. ⚠️ Muda a categoria de todos os lançamentos — um <b>backup é baixado automaticamente antes</b>. As que você deixar "em branco" viram "sem categoria" pra você reetiquetar no Histórico.</div>
+    <div id="remapConfig"></div>
+    <div id="remapResumo" class="small" style="margin-top:10px;color:var(--text-soft)"></div>
+    <button class="btn" onclick="aplicarRemap()" style="margin-top:12px;background:var(--red)">💾 Fazer backup e aplicar nova classificação</button>
+  </div>
+
+  <div class="card">
     <h2>Orçamento por categoria</h2>
     <div class="desc">Defina quanto quer gastar por mês em cada categoria — vira a meta no "Meu Mês". A coluna "Média/mês" mostra quanto você costuma gastar (do seu histórico), pra ajudar a decidir. Deixe em branco para não ter meta.</div>
     <div id="orcamentoConfig"></div>
@@ -766,6 +774,15 @@ const CATEGORIAS_DEFAULT = [
   "ASSINATURAS","LAZER","VIDA ATIVA","ROGÉRIO","MICHELLE","MENINOS",
   "MARGÔ","VIAGEM","DOAÇÃO","DIVERSOS"
 ];
+
+// De→Para padrão para a ferramenta "Trocar classificação" ('' = deixar em branco)
+const DE_PARA_PADRAO = {
+  "Supermercado":"COMIDA","Feira":"COMIDA","APPs Streaming":"ASSINATURAS",
+  "Internet":"MORADIA","Restaurante":"RESTAURANTES","Saúde":"SAÚDE","Lazer":"LAZER",
+  "Margô":"MARGÔ","Michelle":"MICHELLE","Business Michelle":"MICHELLE",
+  "Rogério":"ROGÉRIO","Presente":"DIVERSOS","Carro":"DIVERSOS","Outros":"DIVERSOS",
+  "Casa":"","Serviços":"","Meninos":""
+};
 
 const CARTOES_MICHELLE_DEFAULT = ["1895","8470","6418"];
 
@@ -3850,6 +3867,7 @@ function renderConfig() {
 
   // Orçamento
   renderOrcamentoConfig();
+  renderRemapConfig();
   atualizarStorageInfo();
 }
 
@@ -3857,6 +3875,78 @@ function renderConfig() {
 function renderAssinaturasTab() {
   renderAssinaturasConfig();
   try { renderAssinaturas(); } catch(e) { console.warn('Assinaturas (avisos) erro:', e); }
+}
+
+// ---- Ferramenta "Trocar classificação" (remapear categorias) ----
+let remapMapa = null; // { 'Categoria antiga': 'NOVA' | '' }
+
+// Todas as categorias que aparecem nos dados (+ a lista atual), exceto '??'
+function categoriasEmUso() {
+  const set = new Set(STATE.categorias || []);
+  const add = c => { if (c && c !== '??') set.add(c); };
+  for (const f of (STATE.faturas || [])) for (const t of (f.transacoes || [])) add(t.categoria);
+  if (STATE.faturaAberta) for (const t of (STATE.faturaAberta.transacoes || [])) add(t.categoria);
+  for (const p of (STATE.pendentes || [])) add(p.categoria);
+  for (const a of (STATE.assinaturas || [])) add(a.categoria);
+  for (const k of Object.keys(STATE.orcamentos || {})) add(k);
+  for (const r of Object.values(STATE.dicionario || {})) { if (r) { add(r.cat); (r.alt || []).forEach(p => add(p && p[0])); } }
+  return [...set].sort();
+}
+
+function renderRemapConfig() {
+  const box = document.getElementById('remapConfig');
+  if (!box) return;
+  // categorias antigas = as em uso que NÃO são já as novas
+  const antigas = categoriasEmUso().filter(c => !CATEGORIAS_DEFAULT.includes(c));
+  if (!remapMapa) {
+    remapMapa = {};
+    for (const c of antigas) remapMapa[c] = DE_PARA_PADRAO.hasOwnProperty(c) ? DE_PARA_PADRAO[c] : '';
+  }
+  if (!antigas.length) {
+    box.innerHTML = '<div class="small" style="color:var(--text-dim)">Nada para remapear: todas as categorias em uso já são as novas.</div>';
+    const r = document.getElementById('remapResumo'); if (r) r.innerHTML = '';
+    return;
+  }
+  const opts = (sel) => '<option value=""' + (!sel ? ' selected' : '') + '>(deixar em branco)</option>' +
+    CATEGORIAS_DEFAULT.map(n => `<option value="${n}"${sel === n ? ' selected' : ''}>${n}</option>`).join('');
+  let html = '';
+  for (const c of antigas) {
+    const esc = c.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    html += `<div class="row" style="gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1;min-width:110px">${c}</span>
+      <span style="color:var(--text-dim)">→</span>
+      <select onchange="setRemapDestino('${esc}', this.value)" style="max-width:190px">${opts(remapMapa[c] || '')}</select>
+    </div>`;
+  }
+  box.innerHTML = html;
+  atualizarRemapResumo();
+}
+
+function setRemapDestino(cat, val) {
+  if (!remapMapa) remapMapa = {};
+  remapMapa[cat] = val;
+  atualizarRemapResumo();
+}
+
+function atualizarRemapResumo() {
+  const el = document.getElementById('remapResumo');
+  if (!el || !remapMapa) return;
+  const { resumo } = aplicarDePara(STATE, remapMapa, CATEGORIAS_DEFAULT);
+  el.innerHTML = `Prévia: <b>${resumo.nLancamentos}</b> lançamento(s) mudam de categoria · <b>${resumo.nBranco}</b> ficam sem categoria (você reetiqueta no Histórico) · <b>${resumo.nOrcamentos}</b> orçamento(s) resultante(s) · <b>${resumo.nDictRemovidos}</b> regra(s) do dicionário removida(s).`;
+}
+
+function aplicarRemap() {
+  if (!remapMapa || !Object.keys(remapMapa).length) { alert('Nada para remapear.'); return; }
+  if (!confirm('Isto vai mudar a categoria de TODO o seu histórico para a nova classificação. Vou baixar um backup automático antes. Continuar?')) return;
+  if (!confirm('Confirma? Os lançamentos das categorias deixadas "em branco" ficarão sem categoria para você reclassificar depois no Histórico.')) return;
+  try { exportarBackup(); } catch(e) { console.warn('backup falhou', e); }
+  const { state, resumo } = aplicarDePara(STATE, remapMapa, CATEGORIAS_DEFAULT);
+  STATE = normalizarEstado(state);
+  salvarState();
+  remapMapa = null;
+  renderConfig();
+  renderAbaAtiva();
+  alert(`✓ Classificação trocada!\n${resumo.nLancamentos} lançamento(s) remapeado(s), ${resumo.nBranco} ficaram sem categoria.\n\nAgora vá no Histórico, filtre "sem categoria" e reetiquete os que ficaram em branco (Casa, Serviços, Meninos).`);
 }
 
 // Modal add cartão
