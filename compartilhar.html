@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lançamentos — Controle de Cartões</title>
+<title>Lançamentos — Controle Financeiro</title>
 <style>
   :root {
     --bg: #FAF8F5; --bg-card: #FFFFFF; --bg-soft: #F2EDE5;
@@ -71,7 +71,7 @@
 </head>
 <body>
 <header>
-  <h1>Lançamentos · <span>Controle de Cartões</span></h1>
+  <h1>Lançamentos · <span>Controle Financeiro</span></h1>
   <div class="sub" id="headerSub">Carregando dados...</div>
 </header>
 <main>
@@ -343,7 +343,7 @@ function enviarWhatsApp() {
   const filtros = [fV&&`Venc: ${fV}`, fC&&`Compet: ${fC}`, fCat&&`Cat: ${fCat}`, fCart&&`Cartão: final ${fCart}`].filter(Boolean);
   const filtrosTxt = filtros.length ? `\nFiltros: ${filtros.join(' | ')}` : '';
 
-  const msg = `*Lançamentos — Controle de Cartões*${filtrosTxt}\n\n${resumoCat}\n\n*Total: ${fmtBRL(total)}*\n(${rows.length} lançamentos)\n\nVer detalhes: ${location.href}`;
+  const msg = `*Lançamentos — Controle Financeiro*${filtrosTxt}\n\n${resumoCat}\n\n*Total: ${fmtBRL(total)}*\n(${rows.length} lançamentos)\n\nVer detalhes: ${location.href}`;
 
   if (navigator.share) {
     navigator.share({ title: 'Lançamentos', text: msg }).catch(() => {});
