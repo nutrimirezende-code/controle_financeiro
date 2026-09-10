@@ -1035,20 +1035,27 @@ function aplicarDePara(state, mapa, novasCategorias) {
     return c; // desconhecida: mantém
   };
   const resumo = { nLancamentos: 0, nBranco: 0, nOrcamentos: 0, nDictRemovidos: 0 };
+  const agora = Date.now();
 
-  const remapTrans = (arr) => {
-    if (!Array.isArray(arr)) return;
-    for (const t of arr) {
-      if (!t || t.categoria == null) continue;
-      const nc = mapCat(t.categoria);
-      if (nc !== t.categoria) { resumo.nLancamentos++; if (nc === '??') resumo.nBranco++; }
-      t.categoria = nc;
-    }
+  // remapeia a categoria de um item; devolve true se mudou
+  const remapItem = (item) => {
+    if (!item || item.categoria == null) return false;
+    const nc = mapCat(item.categoria);
+    if (nc === item.categoria) return false;
+    resumo.nLancamentos++; if (nc === '??') resumo.nBranco++;
+    item.categoria = nc;
+    return true;
   };
-  for (const f of (novo.faturas || [])) remapTrans(f.transacoes);
-  if (novo.faturaAberta) remapTrans(novo.faturaAberta.transacoes);
-  remapTrans(novo.pendentes);
-  remapTrans(novo.assinaturas);
+  // Fatura é a unidade de merge (por id+updatedAt): bumpa updatedAt se alguma
+  // transação mudou, senão a versão antiga (categoria velha) venceria o sync.
+  for (const f of (novo.faturas || [])) {
+    let mudou = false;
+    for (const t of (f.transacoes || [])) if (remapItem(t)) mudou = true;
+    if (mudou) f.updatedAt = agora;
+  }
+  if (novo.faturaAberta) for (const t of (novo.faturaAberta.transacoes || [])) remapItem(t);
+  for (const p of (novo.pendentes || [])) if (remapItem(p)) p.updatedAt = agora;
+  for (const a of (novo.assinaturas || [])) if (remapItem(a)) a.updatedAt = agora;
 
   // orçamentos: remapeia chaves, soma quando junta, descarta branco
   const orcOut = {};
@@ -3936,12 +3943,26 @@ function atualizarRemapResumo() {
 }
 
 function aplicarRemap() {
-  if (!remapMapa || !Object.keys(remapMapa).length) { alert('Nada para remapear.'); return; }
+  if (!remapMapa) remapMapa = {};
+  // revalida: garante que toda categoria antiga em uso tem um destino (default) —
+  // caso os dados tenham mudado entre abrir a tela e aplicar
+  for (const c of categoriasEmUso()) {
+    if (!CATEGORIAS_DEFAULT.includes(c) && !(c in remapMapa)) remapMapa[c] = DE_PARA_PADRAO.hasOwnProperty(c) ? DE_PARA_PADRAO[c] : '';
+  }
+  if (!Object.keys(remapMapa).length) { alert('Nada para remapear.'); return; }
   if (!confirm('Isto vai mudar a categoria de TODO o seu histórico para a nova classificação. Vou baixar um backup automático antes. Continuar?')) return;
   if (!confirm('Confirma? Os lançamentos das categorias deixadas "em branco" ficarão sem categoria para você reclassificar depois no Histórico.')) return;
   try { exportarBackup(); } catch(e) { console.warn('backup falhou', e); }
+  // guarda o que existia ANTES, para tombar na lixeira o que sair (senão o merge
+  // da nuvem com um aparelho não-remapeado ressuscita categorias/regras/orçamentos)
+  const catsAntigas = [...(STATE.categorias || [])];
+  const orcAntigos = Object.keys(STATE.orcamentos || {});
+  const dictAntigos = Object.keys(STATE.dicionario || {});
   const { state, resumo } = aplicarDePara(STATE, remapMapa, CATEGORIAS_DEFAULT);
   STATE = normalizarEstado(state);
+  for (const c of catsAntigas)  if (!STATE.categorias.includes(c)) lixeiraAdd('categorias', c);
+  for (const k of orcAntigos)   if (STATE.orcamentos[k] == null)   lixeiraAdd('orcamentos', k);
+  for (const k of dictAntigos)  if (!STATE.dicionario[k])          lixeiraAdd('dicionario', k);
   salvarState();
   remapMapa = null;
   renderConfig();
