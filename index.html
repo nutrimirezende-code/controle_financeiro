@@ -1004,6 +1004,71 @@ function renderAbaAtiva() {
   else if (tab === 'upload') { renderFaturasList(); renderLancamentosAberta(); }
 }
 
+// Remapeia categorias em TODO o estado (De→Para). Função PURA: não muta `state`,
+// devolve uma cópia transformada + um resumo. `mapa` = { 'Antiga': 'NOVA' | '' }
+// (vazio/null/'??' = deixar em branco). Categoria fora do mapa é mantida.
+function aplicarDePara(state, mapa, novasCategorias) {
+  const novo = JSON.parse(JSON.stringify(state));
+  const mapCat = (c) => {
+    if (c == null) return c;
+    if (Object.prototype.hasOwnProperty.call(mapa, c)) {
+      const d = mapa[c];
+      return (d === '' || d == null || d === '??') ? '??' : d;
+    }
+    return c; // desconhecida: mantém
+  };
+  const resumo = { nLancamentos: 0, nBranco: 0, nOrcamentos: 0, nDictRemovidos: 0 };
+
+  const remapTrans = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const t of arr) {
+      if (!t || t.categoria == null) continue;
+      const nc = mapCat(t.categoria);
+      if (nc !== t.categoria) { resumo.nLancamentos++; if (nc === '??') resumo.nBranco++; }
+      t.categoria = nc;
+    }
+  };
+  for (const f of (novo.faturas || [])) remapTrans(f.transacoes);
+  if (novo.faturaAberta) remapTrans(novo.faturaAberta.transacoes);
+  remapTrans(novo.pendentes);
+  remapTrans(novo.assinaturas);
+
+  // orçamentos: remapeia chaves, soma quando junta, descarta branco
+  const orcOut = {};
+  for (const [k, v] of Object.entries(novo.orcamentos || {})) {
+    const nk = mapCat(k);
+    if (nk === '??') continue;
+    orcOut[nk] = (orcOut[nk] || 0) + (Number(v) || 0);
+  }
+  novo.orcamentos = orcOut;
+  resumo.nOrcamentos = Object.keys(orcOut).length;
+
+  // dicionário: remapeia .cat (remove se branco); remapeia/dedupe .alt
+  const dicOut = {};
+  for (const [chave, r] of Object.entries(novo.dicionario || {})) {
+    if (!r || typeof r !== 'object') { dicOut[chave] = r; continue; }
+    const nc = mapCat(r.cat);
+    if (nc === '??') { resumo.nDictRemovidos++; continue; }
+    const nr = { ...r, cat: nc };
+    if (Array.isArray(r.alt)) {
+      const acc = {};
+      for (const par of r.alt) {
+        if (!Array.isArray(par)) continue;
+        const ac = mapCat(par[0]);
+        if (ac === '??' || ac === nc) continue;
+        acc[ac] = (acc[ac] || 0) + (Number(par[1]) || 0);
+      }
+      const altArr = Object.entries(acc).map(([c, n]) => [c, n]);
+      if (altArr.length) nr.alt = altArr; else delete nr.alt;
+    }
+    dicOut[chave] = nr;
+  }
+  novo.dicionario = dicOut;
+
+  novo.categorias = [...novasCategorias];
+  return { state: novo, resumo };
+}
+
 // Mescla o estado local com o da nuvem sem perder nada de nenhum dos lados.
 // Base = o lado mais recente (updatedAt); coleções com ID são unidas item a item;
 // a lixeira impede que itens excluídos num aparelho voltem pelo outro.
