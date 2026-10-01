@@ -699,7 +699,7 @@
 <div class="modal-bg" id="modalExtra">
   <div class="modal">
     <h3>Adicionar gasto extra</h3>
-    <div class="desc small" style="margin-bottom:12px">Gasto que você pagou e precisa informar ao Rogério no próximo acerto.</div>
+    <div class="desc small" style="margin-bottom:12px">Gasto que você pagou e precisa informar ao Rogério. Entra no acerto selecionado na tela.</div>
     <div class="form-row"><label>Descrição</label><input type="text" id="exDescricao" placeholder="Ex: Conserto da torneira"></div>
     <div class="form-grid">
       <div class="form-row"><label>Valor R$</label><input type="text" id="exValor" placeholder="150,00"></div>
@@ -4489,6 +4489,7 @@ function renderAcertoExtras() {
         <input type="checkbox" id="exb_${e.id}" checked onchange="atualizarMensagem()" style="width:16px;height:16px" title="Desmarque para não incluir nesta mensagem">
         <div class="desc">${e.descricao} <span class="small">(${e.data})</span></div>
         <div class="val">${fmtBRL(e.valor)}</div>
+        <button class="icon-btn" onclick="moverExtraAcerto('${e.id}',-1)" title="Voltar para o acerto anterior">⏮️</button>
         <button class="icon-btn" onclick="moverExtraAcerto('${e.id}',1)" title="Adiar para o próximo acerto">⏭️</button>
         <button class="icon-btn" onclick="excluirExtra('${e.id}')" title="Excluir">🗑️</button>
       </div>`;
@@ -4588,8 +4589,11 @@ function salvarExtra() {
   if (isNaN(valor) || valor <= 0) { alert('Valor inválido.'); return; }
   const data = document.getElementById('exData').value.trim();
   if (!data) { alert('Informe a data.'); return; }
-  const dest = proximoAcertoDe(data);
-  if (!dest) { alert('Data inválida — use DD/MM/AAAA.'); return; }
+  if (!proximoAcertoDe(data)) { alert('Data inválida — use DD/MM/AAAA.'); return; }
+  // Vai pro acerto que está aberto na tela (antes ia pelo da data e "sumia" pra outra quinzena)
+  const mesSel = document.getElementById('acertoMes')?.value;
+  const perSel = document.getElementById('acertoPeriodo')?.value;
+  const dest = (mesSel && perSel) ? { mes: mesSel, periodo: perSel } : proximoAcertoDe(data);
   STATE.extras.push({
     id: 'ex_' + Date.now() + '_' + Math.random().toString(36).slice(2,5),
     descricao, valor, data, enviado: false,
