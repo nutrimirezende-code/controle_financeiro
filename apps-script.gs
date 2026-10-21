@@ -261,6 +261,7 @@ function doPost(e) {
     if (tipo === 'save')          return handleSave(data);
     if (tipo === 'getShareToken') return handleGetShareToken(data);
     if (tipo === 'revogarShare')  return handleRevogarShare(data);
+    if (tipo === 'agente')        return handleAgente(data);
 
     return jsonResponse({ ok: false, erro: 'Tipo desconhecido: ' + tipo });
   } catch (err) {
@@ -942,4 +943,502 @@ function responderConsulta(pergunta) {
   }
 
   return 'Posso te dizer, por exemplo:\n• "quanto tá o acerto?"\n• "quanto gastei em supermercado?"\n• "qual o total do mês?"\n• "quais gastos anotados?"';
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  ENTRADA DA SECRETÁRIA (o Claude que a Michelle usa pelo celular)
+//
+//  Pedido dela em 20/10/2026: falar "gastei X" e o gasto entrar aqui como se
+//  ela tivesse lançado à mão; pedir informação e receber; pedir o acerto e
+//  ele ser montado; mandar a fatura fechada e ela ser lançada. Este app
+//  continua sendo o único lugar dos dados: a Secretária é um espelho.
+//
+//  Por que uma entrada própria, e não o 'save' do app: o 'save' recebe o
+//  estado INTEIRO, e um programa de fora que regrava tudo pode apagar o que
+//  ela lançou pelo celular no meio do caminho. Aqui cada ação mexe em um item,
+//  dentro da mesma trava (LockService) que o app e o bot usam.
+//
+//  Chave: propriedade AGENTE_TOKEN, criada por criarChaveDaSecretaria().
+//  Ela só lança, lê, monta acerto e lança fatura. Não troca PIN, não apaga
+//  nada, não mexe no link do Rogério.
+// ══════════════════════════════════════════════════════════════════
+
+// Rode UMA vez no editor (Executar > criarChaveDaSecretaria). A chave aparece
+// no registro de execução; copie para o arquivo que a Secretária lê.
+// Rodar de novo troca a chave e a antiga para de funcionar na hora.
+function criarChaveDaSecretaria() {
+  var t = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty('AGENTE_TOKEN', t);
+  Logger.log('Chave da Secretária (copie inteira): ' + t);
+}
+
+function validarAgente(token) {
+  var t = PropertiesService.getScriptProperties().getProperty('AGENTE_TOKEN');
+  if (!t || !token || String(token) !== t) throw new Error('Chave da Secretária inválida.');
+}
+
+var MESES_GS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+var ITAU_PARA_MICHELLE_GS = {
+  "ALIMENTAÇÃO":"RESTAURANTES","VESTUÁRIO":"MICHELLE","SAÚDE":"SAÚDE",
+  "DIVERSOS":"DIVERSOS","VEÍCULOS":"DIVERSOS","TURISMO E ENTRETENIM":"LAZER",
+  "MORADIA":"MORADIA","EDUCAÇÃO":"EDUCAÇÃO","HOBBY":"LAZER"
+};
+
+function hojeBRGs() { return Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy'); }
+function idAgente(prefixo) { return prefixo + '_' + Date.now() + '_sec' + Utilities.getUuid().replace(/-/g, '').slice(0, 6); }
+
+function dataBRValida(s) {
+  var p = String(s || '').split('/');
+  if (p.length !== 3) return false;
+  var d = +p[0], m = +p[1], a = +p[2];
+  return d >= 1 && d <= 31 && m >= 1 && m <= 12 && a >= 2000;
+}
+
+// Mesma regra do app (proximoAcertoDe): pago na 1ª quinzena entra no acerto
+// 15-30 do mesmo mês; na 2ª quinzena, no 1-15 do mês seguinte.
+function proximoAcertoDeGs(dataStr) {
+  var p = (dataStr || '').split('/');
+  if (p.length < 3) return null;
+  var dia = parseInt(p[0], 10), mes = parseInt(p[1], 10), ano = parseInt(p[2], 10);
+  if (!dia || !mes || !ano || mes < 1 || mes > 12) return null;
+  var mesIdx = mes - 1, periodo;
+  if (dia <= 15) { periodo = '15-30'; }
+  else { periodo = '1-15'; mesIdx++; if (mesIdx > 11) { mesIdx = 0; ano++; } }
+  return { mes: MESES_GS[mesIdx] + '/' + ano, periodo: periodo };
+}
+
+function acertoAtualGs() {
+  var h = Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM/yyyy').split('/');
+  return { mes: MESES_GS[+h[1] - 1] + '/' + h[2], periodo: +h[0] <= 15 ? '1-15' : '15-30' };
+}
+
+function destinoDoExtraGs(e) {
+  if (e.mesDestino && e.periodoDestino) return { mes: e.mesDestino, periodo: e.periodoDestino };
+  return proximoAcertoDeGs(e.data);
+}
+
+function extraDesteAcertoGs(e, mes, periodo) {
+  var d = destinoDoExtraGs(e) || acertoAtualGs();
+  return d.mes === mes && d.periodo === periodo;
+}
+
+function fmtBRLGs(v) {
+  var n = Number(v || 0);
+  var neg = n < 0; n = Math.abs(n);
+  var s = n.toFixed(2).split('.');
+  return (neg ? '-' : '') + 'R$ ' + s[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + s[1];
+}
+
+// Lê, aplica a mudança e grava, tudo dentro da trava. `mudar` devolve a
+// resposta; se lançar exceção, nada é gravado.
+function comEstado(mudar) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var aba = getOrCreateSheet(ABA_DADOS);
+    var raw = lerChunks(aba);
+    var dados;
+    try { dados = JSON.parse(raw); } catch (e) { throw new Error('Os dados da planilha estão ilegíveis; nada foi gravado.'); }
+    // Planilha vazia aqui é sinal de problema, não de "começar do zero":
+    // gravar em cima apagaria o histórico inteiro.
+    if (!dados || !dados.faturas) throw new Error('A planilha voltou sem as faturas; nada foi gravado.');
+    try { backupDiario(raw); } catch (e) {}
+    var resposta = mudar(dados);
+    dados.updatedAt = Date.now();
+    salvarChunks(aba, JSON.stringify(dados));
+    getOrCreateSheet(ABA_CONFIG).getRange('B2').setValue(new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
+    return resposta;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function lerEstado() {
+  var aba = getOrCreateSheet(ABA_DADOS);
+  var dados = JSON.parse(lerChunks(aba));
+  if (!dados || !dados.faturas) throw new Error('A planilha voltou sem as faturas.');
+  return dados;
+}
+
+// ── Ler ──────────────────────────────────────────────────────────
+// Devolve o estado inteiro (menos a lixeira): a Secretária responde as
+// perguntas dela a partir daqui, com as mesmas contas que o app faz.
+function agenteLer() {
+  var d = lerEstado();
+  delete d.lixeira;
+  return { ok: true, dados: d };
+}
+
+// ── Gasto ────────────────────────────────────────────────────────
+// forma 'cartao' = Registro rápido "no cartão" (fica em pendentes até a fatura);
+// forma 'acerto' = Registro rápido "pro acerto" (extras, entra no acerto com o Rogério).
+function agenteGasto(p) {
+  var valor = Number(p.valor);
+  if (!(valor > 0)) throw new Error('Valor inválido.');
+  var desc = String(p.descricao || '').trim().slice(0, 120);
+  if (!desc) throw new Error('Falta a descrição.');
+  var data = p.data ? String(p.data) : hojeBRGs();
+  if (!dataBRValida(data)) throw new Error('Data inválida, use DD/MM/AAAA.');
+  if (p.forma !== 'cartao' && p.forma !== 'acerto') throw new Error('forma deve ser "cartao" ou "acerto".');
+
+  return comEstado(function(d) {
+    var agora = Date.now();
+    if (p.forma === 'cartao') {
+      if (!d.pendentes) d.pendentes = [];
+      var cats = d.categorias || [];
+      var cat = p.categoria && cats.indexOf(p.categoria) >= 0 ? p.categoria : '??';
+      var item = {
+        id: idAgente('pd'), data: data, estabelecimento: desc, valor: valor,
+        cartao: String(p.cartao || d.cartaoAtivo || ''), categoria: cat,
+        conciliado: false, updatedAt: agora
+      };
+      d.pendentes.push(item);
+      return { ok: true, onde: 'cartao', item: item };
+    }
+    if (!d.extras) d.extras = [];
+    var dest = (p.mesDestino && p.periodoDestino) ? { mes: p.mesDestino, periodo: p.periodoDestino } : (proximoAcertoDeGs(data) || {});
+    var ex = {
+      id: idAgente('ex'), descricao: desc, valor: valor, data: data, enviado: false,
+      mesDestino: dest.mes || null, periodoDestino: dest.periodo || null, updatedAt: agora
+    };
+    d.extras.push(ex);
+    return { ok: true, onde: 'acerto', item: ex };
+  });
+}
+
+// ── Acerto ───────────────────────────────────────────────────────
+// Monta a mesma mensagem que a aba Acerto mostra. Com registrar: true, faz o
+// que o botão "marcar como enviado" faz (só depois que ela confirmou o envio).
+// `excluirIds` tira contas/extras da mensagem, como desmarcar na tela.
+function montarAcertoGs(d, mes, periodo, excluirIds, valores) {
+  var fora = {}; (excluirIds || []).forEach(function(id) { fora[id] = true; });
+  valores = valores || {};
+  var diaMin = periodo === '1-15' ? 1 : 16, diaMax = periodo === '1-15' ? 15 : 31;
+  var lista = (d.contasFixas || []).filter(function(c) { return c.dia >= diaMin && c.dia <= diaMax; })
+    .map(function(c) { return { id: c.id, descricao: c.descricao, valor: c.valor, dia: c.dia, avulsa: false }; })
+    .concat((d.avulsas || []).filter(function(a) { return !a.enviado && a.mes === mes && a.periodo === periodo; })
+      .map(function(a) { return { id: a.id, descricao: a.descricao, valor: a.valor, dia: diaMin, avulsa: true }; }))
+    .sort(function(a, b) { return a.dia - b.dia; });
+  var contas = lista.filter(function(c) { return !fora[c.id]; }).map(function(c) {
+    var v = valores[c.id] != null ? Number(valores[c.id]) : c.valor;
+    return { id: c.id, descricao: c.descricao, valor: v, dia: c.dia, avulsa: c.avulsa };
+  });
+  var extras = (d.extras || []).filter(function(e) { return !e.enviado && extraDesteAcertoGs(e, mes, periodo) && !fora[e.id]; });
+  var totalFixas = contas.reduce(function(s, c) { return s + c.valor; }, 0);
+  var totalExtras = extras.reduce(function(s, e) { return s + e.valor; }, 0);
+  var total = totalFixas + totalExtras;
+
+  var msg = '📋 *Contas ' + mes + ' — Período ' + periodo + '*\n\n';
+  if (contas.length) {
+    msg += '*Contas:*\n';
+    contas.forEach(function(c) {
+      msg += c.avulsa ? '  • ' + c.descricao + ' — ' + fmtBRLGs(c.valor) + '\n'
+                      : '  • ' + c.descricao + ' (dia ' + c.dia + ') — ' + fmtBRLGs(c.valor) + '\n';
+    });
+    msg += '  _Subtotal: ' + fmtBRLGs(totalFixas) + '_\n';
+  }
+  if (extras.length) {
+    msg += '\n*Extras que paguei:*\n';
+    extras.forEach(function(e) { msg += '  • ' + e.descricao + ' (' + e.data + ') — ' + fmtBRLGs(e.valor) + '\n'; });
+    msg += '  _Subtotal: ' + fmtBRLGs(totalExtras) + '_\n';
+  }
+  msg += '\n💰 *Total: ' + fmtBRLGs(total) + '*';
+  return { mes: mes, periodo: periodo, contas: contas, extras: extras, totalFixas: totalFixas, totalExtras: totalExtras, total: total, mensagem: msg };
+}
+
+function agenteAcerto(p) {
+  var atual = acertoAtualGs();
+  var mes = p.mes || atual.mes, periodo = p.periodo || atual.periodo;
+  if (periodo !== '1-15' && periodo !== '15-30') throw new Error('periodo deve ser "1-15" ou "15-30".');
+  if (!p.registrar) {
+    var d = lerEstado();
+    var ac = montarAcertoGs(d, mes, periodo, p.excluirIds, p.valores);
+    ac.jaRegistrado = (d.acertos || []).some(function(a) { return a.mes === mes && a.periodo === periodo; });
+    return { ok: true, acerto: ac };
+  }
+  return comEstado(function(d) {
+    var jaExiste = (d.acertos || []).some(function(a) { return a.mes === mes && a.periodo === periodo; });
+    if (jaExiste && !p.mesmoAssim) throw new Error('Já existe um acerto de ' + mes + ' (' + periodo + ') no histórico. Mande mesmoAssim: true para registrar outro.');
+    var ac = montarAcertoGs(d, mes, periodo, p.excluirIds, p.valores);
+    var idsEx = {}; ac.extras.forEach(function(e) { idsEx[e.id] = true; });
+    (d.extras || []).forEach(function(e) { if (idsEx[e.id]) { e.enviado = true; e.updatedAt = Date.now(); } });
+    var idsAv = {}; ac.contas.forEach(function(c) { if (c.avulsa) idsAv[c.id] = true; });
+    (d.avulsas || []).forEach(function(a) { if (idsAv[a.id]) { a.enviado = true; a.updatedAt = Date.now(); } });
+    if (!d.acertos) d.acertos = [];
+    d.acertos.push({
+      id: 'ac_' + Date.now(), data: hojeBRGs(), mes: mes, periodo: periodo,
+      totalFixas: ac.totalFixas, totalExtras: ac.totalExtras, total: ac.total,
+      contasFixas: ac.contas.map(function(c) { return { descricao: c.descricao, valor: c.valor, dia: c.dia, avulsa: c.avulsa }; }),
+      extras: ac.extras.map(function(e) { return { descricao: e.descricao, valor: e.valor, data: e.data }; }),
+      mensagem: ac.mensagem, updatedAt: Date.now()
+    });
+    return { ok: true, registrado: true, acerto: ac };
+  });
+}
+
+// ── Fatura ───────────────────────────────────────────────────────
+// A Secretária lê o PDF e manda as transações já separadas; aqui elas passam
+// pela mesma classificação, conciliação com os gastos anotados e aprendizado
+// do dicionário que o app faz em classificarTransacoes/salvarFatura.
+// simular: true devolve o resultado sem gravar, para ela conferir antes.
+
+function levenshteinGs(a, b) {
+  if (a === b) return 0;
+  var m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  var prev = [], curr = [];
+  for (var j = 0; j <= n; j++) prev[j] = j;
+  for (var i = 1; i <= m; i++) {
+    curr = [i];
+    for (var k = 1; k <= n; k++) curr[k] = Math.min(prev[k] + 1, curr[k - 1] + 1, prev[k - 1] + (a[i - 1] !== b[k - 1] ? 1 : 0));
+    prev = curr;
+  }
+  return prev[n];
+}
+
+function fuzzyMatchGs(dic, chave) {
+  var bestKey = null, bestDist = Infinity;
+  for (var k in dic) {
+    if (!Object.prototype.hasOwnProperty.call(dic, k)) continue;
+    if (k.indexOf(chave) >= 0 || chave.indexOf(k) >= 0) return { key: k, dist: 0, rule: dic[k] };
+    var dd = levenshteinGs(chave, k);
+    var maxLen = Math.max(chave.length, k.length);
+    if (dd < maxLen * 0.35 && dd < bestDist) { bestDist = dd; bestKey = k; }
+  }
+  return bestKey ? { key: bestKey, dist: bestDist, rule: dic[bestKey] } : null;
+}
+
+function classificarGs(dic, estab, catItau) {
+  var chave = normalizarEstabGs(estab);
+  var r = Object.prototype.hasOwnProperty.call(dic, chave) ? dic[chave] : null;
+  if (r) {
+    var total = r.n + (r.alt || []).reduce(function(s, a) { return s + a[1]; }, 0);
+    var conf = r.n / total;
+    return { categoria: r.cat, origem: conf >= 0.8 ? 'auto' : 'revisar', chave: chave };
+  }
+  var fm = fuzzyMatchGs(dic, chave);
+  if (fm && fm.dist <= 3) return { categoria: fm.rule.cat, origem: 'fuzzy', chave: chave, fuzzyKey: fm.key };
+  if (catItau) {
+    for (var k in ITAU_PARA_MICHELLE_GS) if (catItau.indexOf(k) >= 0) return { categoria: ITAU_PARA_MICHELLE_GS[k], origem: 'itau', chave: chave };
+  }
+  return { categoria: '??', origem: 'novo', chave: chave };
+}
+
+function similaridadeEstabGs(a, b) {
+  var na = normalizarEstabGs(a || ''), nb = normalizarEstabGs(b || '');
+  if (!na || !nb) return 0;
+  if (na === nb) return 3;
+  if (na.indexOf(nb) >= 0 || nb.indexOf(na) >= 0) return 2;
+  var dist = levenshteinGs(na, nb), maxLen = Math.max(na.length, nb.length);
+  if (maxLen && dist <= maxLen * 0.4) return 1;
+  return 0;
+}
+
+function diasEntreDatasGs(pDataFull, tDataCurta) {
+  var pp = (pDataFull || '').split('/'); if (pp.length < 3) return null;
+  var pd = +pp[0], pm = +pp[1], pa = +pp[2];
+  var tt = (tDataCurta || '').split('/'); if (tt.length < 2) return null;
+  var td = +tt[0], tm = +tt[1];
+  if (!pd || !pm || !pa || !td || !tm) return null;
+  var dP = new Date(pa, pm - 1, pd), dT = new Date(pa, tm - 1, td);
+  var diff = Math.round((dT - dP) / 86400000);
+  if (diff > 180) { dT = new Date(pa - 1, tm - 1, td); diff = Math.round((dT - dP) / 86400000); }
+  else if (diff < -180) { dT = new Date(pa + 1, tm - 1, td); diff = Math.round((dT - dP) / 86400000); }
+  return Math.abs(diff);
+}
+
+// Mesmo casamento do app: cartão, sinal e valor (até 10 centavos) iguais,
+// até 3 dias de diferença; empate fica sem casar.
+function conciliarPendentesGs(pendentes, trans) {
+  var abertos = (pendentes || []).filter(function(p) { return !p.conciliado; });
+  var usadas = {}, n = 0;
+  abertos.forEach(function(p) {
+    var melhor = null, melhorScore = -1, empate = false;
+    for (var i = 0; i < trans.length; i++) {
+      if (usadas[i]) continue;
+      var t = trans[i];
+      if (p.cartao && t.cartao && p.cartao !== t.cartao) continue;
+      if ((t.valor < 0) !== (p.valor < 0)) continue;
+      var dv = Math.abs(t.valor - p.valor);
+      if (dv > 0.10) continue;
+      var dd = diasEntreDatasGs(p.data, t.data);
+      if (dd === null || dd > 3) continue;
+      var score = (dv < 0.01 ? 3 : 2) + similaridadeEstabGs(p.estabelecimento, t.estabelecimento) + (3 - dd) * 0.3;
+      if (score > melhorScore + 0.01) { melhorScore = score; melhor = i; empate = false; }
+      else if (Math.abs(score - melhorScore) <= 0.01) { empate = true; }
+    }
+    if (melhor === null || empate) return;
+    usadas[melhor] = true;
+    var tr = trans[melhor];
+    tr.conciliado = true;
+    tr.conciliadoPendenteId = p.id;
+    if (p.categoria && p.categoria !== '??') { tr.categoria = p.categoria; tr.origemClass = 'conciliado'; }
+    n++;
+  });
+  return n;
+}
+
+function agenteFatura(p) {
+  var venc = String(p.venc || '');
+  if (!dataBRValida(venc)) throw new Error('venc deve ser DD/MM/AAAA.');
+  var arquivo = String(p.arquivo || ('Fatura ' + venc + ' (Secretária)'));
+  var entrada = p.transacoes || [];
+  if (!entrada.length) throw new Error('A fatura veio sem transações.');
+  var categoriasForcadas = p.categorias || {}; // { indice: 'CATEGORIA' }, decididas com ela
+
+  function montar(d) {
+    var dic = d.dicionario || {};
+    var cats = d.categorias || [];
+    var trans = entrada.map(function(t, i) {
+      var valor = Number(t.valor);
+      if (isNaN(valor)) throw new Error('Transação ' + i + ' sem valor numérico.');
+      var cls = classificarGs(dic, t.estabelecimento, t.catItau || null);
+      var tr = {
+        data: String(t.data || ''), estabelecimento: String(t.estabelecimento || ''), valor: valor,
+        parcela: t.parcela || null, catItau: t.catItau || null, cidade: t.cidade || null, secao: 'secretaria',
+        cartao: String(t.cartao || ''), cartaoNome: String(t.cartaoNome || t.cartao || ''),
+        categoria: cls.categoria, origemClass: cls.origem, chaveDicio: cls.chave, fuzzyKey: cls.fuzzyKey || null
+      };
+      return tr;
+    });
+    var conciliados = p.aberta ? 0 : conciliarPendentesGs(d.pendentes, trans);
+    // Categoria decidida com ela vale por cima de tudo, como a escolha manual na revisão do app.
+    for (var idx in categoriasForcadas) {
+      var c = categoriasForcadas[idx];
+      if (!trans[idx]) throw new Error('Categoria para a transação ' + idx + ', que não existe.');
+      if (cats.indexOf(c) < 0) throw new Error('Categoria "' + c + '" não existe no app.');
+      trans[idx].categoria = c; trans[idx].origemClass = 'manual';
+    }
+    return { trans: trans, conciliados: conciliados };
+  }
+
+  function resumo(trans, conciliados) {
+    var total = trans.reduce(function(s, t) { return s + t.valor; }, 0);
+    var porCat = {};
+    trans.forEach(function(t) { porCat[t.categoria] = (porCat[t.categoria] || 0) + t.valor; });
+    var semCat = [];
+    trans.forEach(function(t, i) { if (t.categoria === '??') semCat.push({ indice: i, data: t.data, estabelecimento: t.estabelecimento, valor: t.valor }); });
+    var revisar = [];
+    trans.forEach(function(t, i) { if (t.origemClass === 'revisar' || t.origemClass === 'fuzzy' || t.origemClass === 'itau') revisar.push({ indice: i, estabelecimento: t.estabelecimento, valor: t.valor, categoria: t.categoria, origem: t.origemClass }); });
+    return {
+      quantidade: trans.length, total: Math.round(total * 100) / 100,
+      totalDeclarado: p.totalDeclarado != null ? Number(p.totalDeclarado) : null,
+      bateComDeclarado: p.totalDeclarado != null ? Math.abs(total - Number(p.totalDeclarado)) < 0.05 : null,
+      porCategoria: porCat, semCategoria: semCat, paraRevisar: revisar, conciliados: conciliados
+    };
+  }
+
+  if (p.simular) {
+    var d0 = lerEstado();
+    var r0 = montar(d0);
+    var dup = (d0.faturas || []).filter(function(f) { return f.venc === venc && f.arquivo === arquivo; }).length > 0;
+    return { ok: true, simulado: true, jaExiste: dup, resumo: resumo(r0.trans, r0.conciliados) };
+  }
+
+  return comEstado(function(d) {
+    var dup = (d.faturas || []).some(function(f) { return f.venc === venc && f.arquivo === arquivo; });
+    if (dup && !p.aberta) throw new Error('Já existe a fatura "' + arquivo + '" com vencimento ' + venc + '. Para trocar, use o app.');
+    var r = montar(d);
+    if (!d.dicionario) d.dicionario = {};
+    r.trans.forEach(function(t) {
+      if (t.categoria === '??') return;
+      if (['manual', 'novo', 'itau', 'revisar', 'fuzzy'].indexOf(t.origemClass) < 0) return;
+      var k = t.chaveDicio, reg = d.dicionario[k];
+      if (!reg) { d.dicionario[k] = { cat: t.categoria, n: 1, alt: [] }; return; }
+      if (reg.cat === t.categoria) { reg.n++; return; }
+      var alt = reg.alt || [];
+      var achou = alt.filter(function(a) { return a[0] === t.categoria; })[0];
+      if (achou) achou[1]++; else alt.push([t.categoria, 1]);
+      reg.alt = alt;
+    });
+    // O dicionário mudou fora do merge por item: tira as chaves aprendidas da
+    // lixeira, como o app faz (lixeiraRemove), senão o merge apagaria de volta.
+    if (d.lixeira && d.lixeira.dicionario) {
+      var aprendidas = {}; r.trans.forEach(function(t) { aprendidas[t.chaveDicio] = true; });
+      d.lixeira.dicionario = d.lixeira.dicionario.filter(function(x) { return !aprendidas[x.id]; });
+    }
+
+    if (p.aberta) {
+      d.faturaAberta = { transacoes: r.trans, venc: venc, arquivo: arquivo, importadaEm: Date.now() };
+      return { ok: true, salvo: 'aberta', resumo: resumo(r.trans, 0) };
+    }
+
+    var id = 'f_' + Date.now() + '_sec' + Utilities.getUuid().replace(/-/g, '').slice(0, 5);
+    var idsConc = {}; r.trans.forEach(function(t) { if (t.conciliadoPendenteId) idsConc[t.conciliadoPendenteId] = true; });
+    (d.pendentes || []).forEach(function(pd) {
+      if (idsConc[pd.id]) { pd.conciliado = true; pd.faturaId = id; pd.updatedAt = Date.now(); }
+    });
+    var cartoes = []; r.trans.forEach(function(t) { if (t.cartao && cartoes.indexOf(t.cartao) < 0) cartoes.push(t.cartao); });
+    d.faturas.push({
+      id: id, arquivo: arquivo, venc: venc, postagem: p.postagem || null,
+      cartoesSelecionados: cartoes, transacoes: r.trans,
+      subtotaisDeclarados: p.subtotaisDeclarados || {}, totalDeclarado: p.totalDeclarado != null ? Number(p.totalDeclarado) : null,
+      dataAdd: new Date().toISOString(), updatedAt: Date.now()
+    });
+    d.faturaAberta = null;
+    return { ok: true, salvo: 'fechada', faturaId: id, resumo: resumo(r.trans, r.conciliados) };
+  });
+}
+
+function handleAgente(data) {
+  validarAgente(data.chave);
+  var acao = data.acao || '';
+  if (acao === 'ler')     return jsonResponse(agenteLer());
+  if (acao === 'gasto')   return jsonResponse(agenteGasto(data));
+  if (acao === 'acerto')  return jsonResponse(agenteAcerto(data));
+  if (acao === 'fatura')  return jsonResponse(agenteFatura(data));
+  throw new Error('Ação desconhecida para a Secretária: ' + acao);
+}
+
+// Cópia exata de normalizar() do index.html: a chave do dicionário tem que
+// sair igual à do app, senão o que a Secretária lança não aprende nem casa.
+function normalizarEstabGs(nome) {
+  let s = (nome || "").toUpperCase().trim();
+  s = s.replace(/^(MP\s+|PG\s+|ZP\s+|HTM\s+|EBN\s+|DM\s+|ASA\s+|PAYPAL\s+|PAY\s*PAL\s+|VINDI\s+|APP\s+|EC\s+)/i, '');
+  s = s.replace(/\s+\d+\/\d+\s*$/, '');
+  s = s.replace(/\s+-.*$/, '');
+  s = s.replace(/\s+\d{2}\/\d{2}.*$/, '');
+  s = s.replace(/\s+/g, ' ').trim();
+  const aliases = {
+    'APPLE BIL':'APPLE BILL','APPLECOMBILL':'APPLE BILL','APPLE.COM/BILL':'APPLE BILL',
+    'SPOTFY':'SPOTIFY','NETFLIX.COM':'NETFLIX',
+    'IRMAOS BOA':'SUPERMERCADOS BOA','BOA SUPERMERCADOS':'SUPERMERCADOS BOA',
+    'ROLDAO':'ROLDÃO SUPERMERCADO','ROLDAO JUNDIAI':'ROLDÃO SUPERMERCADO','ROLDAO JUNDIAI 3':'ROLDÃO SUPERMERCADO',
+    'CONTA VIVO':'VIVO INTERNET','IFD':'IFOOD',
+    'CINEMARC':'CINEMARK','PAYPAL FACEBOOK':'FACEBOOK','PAY PAL FACEBOOK':'FACEBOOK',
+    'PAYPAL GOOGLE YOUTUB':'YOUTUBE','PAY PAL GOOGLE':'GOOGLE',
+    'GOOGLE - YOUTUBE PREMIUM':'YOUTUBE',
+    'EBN CANVA':'CANVA','CANVA04749 45':'CANVA','CANVA04780 68':'CANVA','CANVA0480':'CANVA',
+    'DROGRARIA SP':'DROGARIA SP','DROGARIA SAO PAULO SA':'DROGARIA SP',
+    'DROGASIL2573':'DROGASIL','DROGASIL 1546':'DROGASIL','DROGASIL 2871':'DROGASIL',
+    'DROGASIL 2368':'DROGASIL','DROGASIL 3540':'DROGASIL','DROGASIL1915':'DROGASIL',
+    'MERCADOLIVRE MERCADOL':'MERCADO LIVRE','MERCADO MERCADOLIVRE':'MERCADO LIVRE',
+    'MERCADOLIVRE MELIMAIS':'MELIMAIS',
+    'PAY PAL':'FACEBOOK',
+    'IRMAOS BOA SUPERMERCADO':'SUPERMERCADOS BOA',
+    'COVABRA SUPE':'COVABRA SUPERMERCADO','COVABRA SUPERMERCADOS':'COVABRA SUPERMERCADO',
+  };
+  if (aliases[s]) return aliases[s];
+  if (s.startsWith('DROGARIA ')) return 'DROGARIA SP';
+  if (s.startsWith('DROGASIL')) return 'DROGASIL';
+  if (s.startsWith('IRMAOS BOA')) return 'SUPERMERCADOS BOA';
+  if (s.startsWith('SUPERMERCADOS BOA')) return 'SUPERMERCADOS BOA';
+  if (s.startsWith('COVABRA')) return 'COVABRA SUPERMERCADO';
+  if (s.startsWith('COOPERCICA')) return 'COOPERCICA SUPERMERCADO';
+  if (s.startsWith('ROLDAO')) return 'ROLDÃO SUPERMERCADO';
+  if (s.includes('PAYPAL FACEBOOK') || s.includes('PAY PAL FACEBOOK')) return 'FACEBOOK';
+  if (s.includes('FACEBOOK')) return 'FACEBOOK';
+  if (s.includes('CHATGPT') || s.includes('OPENAI')) return 'OPENAI CHATGPT';
+  if (s.includes('CANVA')) return 'CANVA';
+  if (s.includes('SPOTIFY') || s.includes('SPOTFY')) return 'SPOTIFY';
+  if (s.includes('NETFLIX')) return 'NETFLIX';
+  if (s.includes('LATAM AIR')) return 'LATAM AIR';
+  if (s.includes('AZUL LINHAS') || s === 'AZUL') return 'AZUL';
+  if (s.includes('IMAGEM UNIFORMES')) return 'IMAGEM UNIFORMES';
+  if (s.includes('SUPERMERCADO JVA')) return 'SUPERMERCADO JVA';
+  if (s.includes('MERCADO LIVRE') || s.includes('MERCADOLIVRE')) return 'MERCADO LIVRE';
+  // Detecção de estornos via keyword
+  if (s.includes('ESTORNO') || s.includes('DEVOLUÇÃO') || s.includes('CANCELAMENTO')) return s;
+  return s;
 }
