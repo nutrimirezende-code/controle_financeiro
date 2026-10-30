@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/compartilhar", "destination": "/compartilhar.html" }
+  ]
+}
